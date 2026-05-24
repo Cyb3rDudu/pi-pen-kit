@@ -50,7 +50,7 @@ mkdir -p /root/.pi/agent/sessions
 cat > /root/.pi/agent/settings.json << EOF
 {
   "defaultProvider": "ci-llm",
-  "defaultModel": "deepseek-chat",
+  "defaultModel": "deepseek-v4-flash",
   "defaultThinkingLevel": "off",
   "packages": [
     "/opt/pi-pen-kit/pi-sliver"
@@ -67,7 +67,7 @@ cat > /root/.pi/agent/models.json << EOF
       "apiKey": "${LLM_API_KEY}",
       "models": [
         {
-          "id": "deepseek-chat",
+          "id": "deepseek-v4-flash",
           "name": "DeepSeek V4 Flash",
           "reasoning": false,
           "input": ["text"],
@@ -119,6 +119,12 @@ echo "[6/6] Cleanup..."
 kill ${SLIVER_PID} 2>/dev/null || true
 
 if [ "${FAIL_COUNT}" -gt 0 ]; then
+  exit 1
+fi
+
+# Fix: 0 passes should also fail
+if [ "${PASS_COUNT}" -lt 1 ]; then
+  echo "ERROR: No tests passed — LLM likely did not execute tools"
   exit 1
 fi
 
