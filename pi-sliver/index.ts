@@ -26,6 +26,10 @@ import { basename, join } from "node:path";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { ParseConfigFile, SliverClient, type SliverClientConfig } from "sliver-script";
 import type { InteractiveBeacon, InteractiveSession } from "sliver-script";
+// Deep import — sliver-script's top-level index doesn't re-export the
+// generated proto namespaces, but we need clientpb.ImplantConfig (and
+// clientpb.OutputFormat) to build a real protobuf Message for `generate()`.
+import { clientpb } from "sliver-script/lib/pb/clientpb/client";
 
 // ---------------------------------------------------------------------------
 // Config + connection state
@@ -846,27 +850,27 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const c = await getClient();
-        const formatMap: Record<string, number> = {
-          EXECUTABLE: 0,
-          SHARED_LIB: 1,
-          SERVICE: 2,
-          SHELLCODE: 3,
+        const formatMap: Record<string, clientpb.OutputFormat> = {
+          SHARED_LIB: clientpb.OutputFormat.SHARED_LIB,
+          SHELLCODE: clientpb.OutputFormat.SHELLCODE,
+          EXECUTABLE: clientpb.OutputFormat.EXECUTABLE,
+          SERVICE: clientpb.OutputFormat.SERVICE,
         };
-        const config: any = {
+        const c2 = new clientpb.ImplantC2({ URL: p.c2_url, Priority: 0 });
+        const config = new clientpb.ImplantConfig({
           Name: p.name,
           GOOS: p.os,
           GOARCH: p.arch ?? "amd64",
-          Format: formatMap[p.format ?? "EXECUTABLE"] ?? 0,
+          Format: formatMap[p.format ?? "EXECUTABLE"],
           IsBeacon: p.is_beacon ?? false,
           BeaconInterval: nsFromSeconds(p.beacon_interval_seconds ?? 60),
           BeaconJitter: nsFromSeconds(p.beacon_jitter_seconds ?? 30),
           Debug: p.debug ?? false,
           Evasion: p.evasion ?? false,
-          C2: [{ URL: p.c2_url, Priority: 0 }],
+          C2: [c2],
           ReconnectInterval: nsFromSeconds(60),
-          PollInterval: 0,
           MaxConnectionErrors: 1000,
-        };
+        });
         const f: any = pbToObject(await c.generate(config)) ?? {};
         const data: unknown = f.data ?? f.Data;
         const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
