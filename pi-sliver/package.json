@@ -1,0 +1,29 @@
+{
+  "name": "pi-extension-sliver",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pi extension that drives a Sliver C2 server as the Pi agent's operator client — list/interact with sessions and beacons, run commands, manage listeners and implant builds, with live new-session notifications.",
+  "license": "MIT",
+  "author": "Cyb3rDudu",
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "sliver-script": "^1.2.5"
+  },
+  "keywords": [
+    "pi-extension",
+    "pi-coding-agent",
+    "sliver",
+    "c2",
+    "red-team",
+    "pentest"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cyb3rDudu/pi-pen-kit.git"
+  }
+}
