@@ -29,7 +29,7 @@ import type { InteractiveBeacon, InteractiveSession } from "sliver-script";
 // Deep import — sliver-script's top-level index doesn't re-export the
 // generated proto namespaces, but we need clientpb.ImplantConfig (and
 // clientpb.OutputFormat) to build a real protobuf Message for `generate()`.
-import { clientpb } from "sliver-script/lib/pb/clientpb/client";
+import { clientpb } from "sliver-script/lib/pb/clientpb/client.js";
 
 // ---------------------------------------------------------------------------
 // Config + connection state
