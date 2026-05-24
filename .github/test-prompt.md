@@ -5,6 +5,16 @@ You MUST execute every test below using the actual sliver_* tools. Do NOT descri
 Execute each test in order. For every test, print exactly one line with `[PASS]` or `[FAIL]` and the tool name.
 If a tool returns an error, print `[FAIL] tool_name: error_message` and continue to the next test.
 
+IMPORTANT: After EVERY tool call, print the result before printing PASS/FAIL. Show the actual JSON response. For example:
+
+```
+Calling sliver_version...
+Result: {"Major":1,"Minor":7,"Patch":3}
+[PASS] sliver_version
+```
+
+Do NOT skip showing the result. Print it.
+
 You are running in CI. The Sliver server is on localhost:31337. The target machine is at the hostname `target`.
 
 ## Phase 1: Server discovery (no target needed)

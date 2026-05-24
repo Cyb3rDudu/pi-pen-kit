@@ -34,6 +34,7 @@
     "url": "https://github.com/Cyb3rDudu/pi-pen-kit.git"
   },
   "devDependencies": {
+    "typebox": "^1.1.38",
     "vitest": "^4.1.7"
   }
 }
