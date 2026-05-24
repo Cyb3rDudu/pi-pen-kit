@@ -133,11 +133,36 @@ type Content =
 
 type ToolResult = { content: Content[]; details: unknown };
 
+// google-protobuf message objects don't serialize as readable JSON — they
+// expose internal short keys (D, u, G, …) via the default toJSON path.
+// `.toObject()` on the generated Message gives a plain JS object with the
+// real field names. We apply it recursively because RPCs frequently return
+// arrays/maps of messages.
+function pbToObject(v: unknown): unknown {
+  if (v == null) return v;
+  if (typeof (v as any).toObject === "function") {
+    try {
+      return pbToObject((v as any).toObject());
+    } catch {
+      // fall through to generic handling
+    }
+  }
+  if (Array.isArray(v)) return v.map(pbToObject);
+  if (Buffer.isBuffer(v) || v instanceof Uint8Array) return Buffer.from(v as Uint8Array).toString("base64");
+  if (typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(v as object)) out[k] = pbToObject(val);
+    return out;
+  }
+  return v;
+}
+
 function textResult(text: string, details: unknown = null): ToolResult {
   return { content: [{ type: "text", text }], details };
 }
 function jsonResult(obj: unknown): ToolResult {
-  return { content: [{ type: "text", text: JSON.stringify(obj, null, 2) }], details: obj };
+  const plain = pbToObject(obj);
+  return { content: [{ type: "text", text: JSON.stringify(plain, null, 2) }], details: plain };
 }
 function errorResult(e: unknown): ToolResult {
   const msg = e instanceof Error ? e.message : String(e);
@@ -244,7 +269,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
           operator: clientConfig?.operator,
           server: clientConfig ? `${clientConfig.lhost}:${clientConfig.lport}` : undefined,
           version,
-          operators: (operators ?? []).map((o: any) => ({ Name: o.Name, Online: o.Online })),
+          operators: operators ?? [],
           counts: {
             sessions: (sessions ?? []).length,
             beacons: (beacons ?? []).length,
@@ -265,29 +290,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute() {
       try {
         const c = await getClient();
-        const sessions = (await c.sessions()) ?? [];
-        return jsonResult(
-          sessions.map((s: any) => ({
-            ID: s.ID,
-            Name: s.Name,
-            Hostname: s.Hostname,
-            Username: s.Username,
-            UID: s.UID,
-            GID: s.GID,
-            OS: s.OS,
-            Arch: s.Arch,
-            Version: s.Version,
-            RemoteAddress: s.RemoteAddress,
-            PID: s.PID,
-            Filename: s.Filename,
-            Transport: s.Transport,
-            LastCheckin: s.LastCheckin,
-            ReconnectInterval: s.ReconnectInterval,
-            ProxyURL: s.ProxyURL,
-            IsDead: s.IsDead,
-            Burned: s.Burned,
-          })),
-        );
+        return jsonResult((await c.sessions()) ?? []);
       } catch (e) {
         return errorResult(e);
       }
@@ -342,12 +345,16 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       try {
         const target = await getTarget(p);
         const res: any = await target.execute(p.exe, p.args ?? [], p.output ?? true, p.timeout);
+        const plain: any = pbToObject(res) ?? {};
+        // Decode stdout/stderr if present (toObject leaves byte fields as base64 strings).
+        const decode = (v: unknown): string =>
+          typeof v === "string" ? Buffer.from(v, "base64").toString("utf8") : "";
         return jsonResult({
-          status: res?.Status,
-          pid: res?.Pid,
-          stdout: toBuffer(res?.Stdout).toString("utf8"),
-          stderr: toBuffer(res?.Stderr).toString("utf8"),
-          response: res?.Response,
+          status: plain.status ?? plain.Status,
+          pid: plain.pid ?? plain.Pid,
+          stdout: decode(plain.stdout ?? plain.Stdout),
+          stderr: decode(plain.stderr ?? plain.Stderr),
+          response: plain.response ?? plain.Response,
         });
       } catch (e) {
         return errorResult(e);
@@ -574,8 +581,9 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        const shot: any = await t.screenshot();
-        const buf = toBuffer(shot?.Data);
+        const shot: any = pbToObject(await t.screenshot()) ?? {};
+        const data: unknown = shot.data ?? shot.Data;
+        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
         const dir = ensureDownloadDir();
         const path = join(dir, `screenshot-${Date.now()}.png`);
         writeFileSync(path, buf);
@@ -766,12 +774,14 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const c = await getClient();
-        const f: any = await c.regenerate(p.name);
-        const buf = toBuffer(f?.Data);
+        const f: any = pbToObject(await c.regenerate(p.name)) ?? {};
+        const data: unknown = f.data ?? f.Data;
+        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
+        const name = f.name ?? f.Name ?? p.name;
         const dir = ensureDownloadDir();
-        const path = join(dir, f?.Name ?? p.name);
+        const path = join(dir, name);
         writeFileSync(path, buf);
-        return jsonResult({ local_path: path, bytes: buf.length, name: f?.Name });
+        return jsonResult({ local_path: path, bytes: buf.length, name });
       } catch (e) {
         return errorResult(e);
       }
@@ -857,12 +867,14 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
           PollInterval: 0,
           MaxConnectionErrors: 1000,
         };
-        const f: any = await c.generate(config);
-        const buf = toBuffer(f?.Data);
+        const f: any = pbToObject(await c.generate(config)) ?? {};
+        const data: unknown = f.data ?? f.Data;
+        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
+        const name = f.name ?? f.Name ?? p.name;
         const dir = ensureDownloadDir();
-        const local = join(dir, f?.Name ?? p.name);
+        const local = join(dir, name);
         writeFileSync(local, buf);
-        return jsonResult({ local_path: local, bytes: buf.length, name: f?.Name });
+        return jsonResult({ local_path: local, bytes: buf.length, name });
       } catch (e) {
         return errorResult(e);
       }
