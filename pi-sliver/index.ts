@@ -36,7 +36,7 @@ const DISABLED = !!process.env.PI_SLIVER_DISABLE;
 const CONFIG_OVERRIDE = process.env.PI_SLIVER_CONFIG?.trim();
 const DOWNLOAD_DIR = process.env.PI_SLIVER_DOWNLOAD_DIR?.trim() || join(tmpdir(), "pi-sliver");
 
-function discoverConfigPath(): string | undefined {
+export function discoverConfigPath(): string | undefined {
   if (CONFIG_OVERRIDE) return CONFIG_OVERRIDE;
   const dir = join(homedir(), ".sliver-client", "configs");
   let entries: string[];
@@ -120,7 +120,7 @@ function subscribeEvents(c: SliverClient) {
   eventSub = sub as unknown as { unsubscribe: () => void };
 }
 
-function short(id: unknown): string {
+export function short(id: unknown): string {
   return typeof id === "string" ? id.slice(0, 8) : String(id ?? "?");
 }
 
@@ -137,7 +137,7 @@ type ToolResult = { content: Content[]; details: unknown };
 // ts-proto returns `bytes` fields as Uint8Array, which JSON.stringify renders
 // as {0: 1, 1: 2, ...}. Walk the object and base64 any byte payloads so the
 // agent sees usable strings. Buffer is a Uint8Array subtype.
-function normalize(v: unknown): unknown {
+export function normalize(v: unknown): unknown {
   if (v == null) return v;
   if (v instanceof Uint8Array) return Buffer.from(v).toString("base64");
   if (Array.isArray(v)) return v.map(normalize);
@@ -183,7 +183,7 @@ function ensureDownloadDir(): string {
   return DOWNLOAD_DIR;
 }
 
-function toBuffer(v: unknown): Buffer {
+export function toBuffer(v: unknown): Buffer {
   if (!v) return Buffer.alloc(0);
   if (Buffer.isBuffer(v)) return v;
   if (v instanceof Uint8Array) return Buffer.from(v);
@@ -191,7 +191,7 @@ function toBuffer(v: unknown): Buffer {
   return Buffer.alloc(0);
 }
 
-function decodeBytes(v: unknown): string {
+export function decodeBytes(v: unknown): string {
   if (!v) return "";
   if (v instanceof Uint8Array) return Buffer.from(v).toString("utf8");
   if (typeof v === "string") {
@@ -209,12 +209,12 @@ function decodeBytes(v: unknown): string {
 // Sliver ImplantConfig durations are int64 nanoseconds encoded as decimal
 // strings in the modern proto. Older builds used numbers, which the new
 // server quietly rejects with "record not found".
-function nsString(seconds: number): string {
+export function nsString(seconds: number): string {
   return String(Math.max(0, Math.floor(seconds)) * 1_000_000_000);
 }
 
 // Map a C2 URL scheme to the right Include* flag on ImplantConfig.
-function includeFlagsFor(c2Url: string): Record<string, boolean> {
+export function includeFlagsFor(c2Url: string): Record<string, boolean> {
   const scheme = c2Url.match(/^([a-z+]+):/i)?.[1]?.toLowerCase() ?? "";
   return {
     IncludeMTLS: scheme === "mtls",

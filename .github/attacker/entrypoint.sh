@@ -39,7 +39,17 @@ ls -la /root/.sliver-client/configs/
 # ----------------------------------------------------------------
 # 2. Wait for target container to be reachable
 # ----------------------------------------------------------------
-echo "  [2/6] Target container is at ${TARGET_IP} (polling for implant)"
+echo "  [2/6] Waiting for target container at ${TARGET_IP}:8080..."
+for i in $(seq 1 30); do
+  if curl -sf -o /dev/null "http://${TARGET_IP}:8080/ready" 2>/dev/null; then
+    echo "  Target is up"
+    break
+  fi
+  if [ "$i" -eq 30 ]; then
+    echo "  WARN: Target not responding, continuing anyway"
+  fi
+  sleep 2
+done
 
 # ----------------------------------------------------------------
 # 3. Configure Pi settings
@@ -97,8 +107,8 @@ PI_EXIT=$?
 # ----------------------------------------------------------------
 echo "[5/6] Parsing test results..."
 
-PASS_COUNT=$(grep -c '\[PASS\]' /tmp/pi-test-output.txt || echo 0)
-FAIL_COUNT=$(grep -c '\[FAIL\]' /tmp/pi-test-output.txt || echo 0)
+PASS_COUNT=$(grep -cE '\[PASS\]|\`\[PASS\]\`' /tmp/pi-test-output.txt || echo 0)
+FAIL_COUNT=$(grep -cE '\[FAIL\]|\`\[FAIL\]\`' /tmp/pi-test-output.txt || echo 0)
 
 echo ""
 echo "========================================="
