@@ -1,5 +1,7 @@
 # Pi-Sliver Extension Test Suite
 
+You MUST execute every test below using the actual sliver_* tools. Do NOT describe the tests. Do NOT summarize. Do NOT write example output. Call each tool, check the result, and print exactly `[PASS] tool_name` or `[FAIL] tool_name: error` after each one.
+
 Execute each test in order. For every test, print exactly one line with `[PASS]` or `[FAIL]` and the tool name.
 If a tool returns an error, print `[FAIL] tool_name: error_message` and continue to the next test.
 
