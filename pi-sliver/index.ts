@@ -15,8 +15,8 @@
  * License: MIT
  */
 
-import type { ExtensionAPI, ExtensionUIContext } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import type { ExtensionAPI, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import { Type } from "typebox";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
