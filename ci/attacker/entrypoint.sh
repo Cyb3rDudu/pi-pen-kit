@@ -9,13 +9,18 @@ echo "=== pi-sliver CI test runner ==="
 echo "[1/6] Starting Sliver server..."
 mkdir -p /root/.sliver-client/configs
 
-# Start server in background, wait for config generation
+# First run: unpack assets
+sliver-server unpack -f 2>/dev/null || true
+
+# Start server in background
 sliver-server daemon --lhost 127.0.0.1 --lport 31337 &
 SLIVER_PID=$!
 
+# Wait for the server to be ready (port 31337 accepting connections)
+echo "  Waiting for gRPC port..."
 for i in $(seq 1 30); do
-  if compgen -G "/root/.sliver-client/configs/*.cfg" > /dev/null 2>&1; then
-    echo "  Sliver server up, config generated"
+  if curl -sf -o /dev/null 127.0.0.1:31337 2>/dev/null || nc -z 127.0.0.1 31337 2>/dev/null; then
+    echo "  Server is up on port 31337"
     break
   fi
   if [ "$i" -eq 30 ]; then
@@ -24,6 +29,12 @@ for i in $(seq 1 30); do
   fi
   sleep 1
 done
+
+# Generate operator config
+sliver-server operator --name ci --lhost 127.0.0.1 --lport 31337 --permissions all --save /root/.sliver-client/configs
+
+echo "  Operator config generated:"
+ls -la /root/.sliver-client/configs/
 
 # ----------------------------------------------------------------
 # 2. Wait for target container to be reachable

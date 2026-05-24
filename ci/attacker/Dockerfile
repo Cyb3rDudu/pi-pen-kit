@@ -8,7 +8,7 @@
 FROM node:22-slim AS base
 
 RUN apt-get update -qq && apt-get install -y -qq \
-    curl wget git jq unzip build-essential \
+    curl wget git jq unzip build-essential netcat-openbsd \
     && rm -rf /var/lib/apt/lists/*
 
 # --- Sliver server + client ---
