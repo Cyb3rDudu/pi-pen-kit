@@ -29,10 +29,10 @@ RUN npm install
 WORKDIR /opt/pi-pen-kit
 
 # --- CI test prompt ---
-COPY ci/test-prompt.md /opt/pi-pen-kit/ci/test-prompt.md
+COPY .github/test-prompt.md /opt/pi-pen-kit/ci/test-prompt.md
 
 # --- Entrypoint: start Sliver server, configure Pi, run tests ---
-COPY ci/attacker/entrypoint.sh /entrypoint.sh
+COPY .github/attacker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]
