@@ -1,0 +1,22 @@
+{
+  "name": "pi-metasploit",
+  "version": "1.0.0",
+  "description": "Metasploit C2 operator client as a Pi extension",
+  "main": "index.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "msf-script": "file:../msf-script"
+  },
+  "devDependencies": {
+    "typebox": "^1.1.38",
+    "vitest": "^3.1.1"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "piExtension": true
+}
