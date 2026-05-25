@@ -99,7 +99,7 @@ echo "  Settings written"
 echo "[4/6] Running Pi test suite..."
 cd /opt/pi-pen-kit
 
-pi -p "Execute this test plan now. Call each sliver_* tool and print results. Do NOT summarize. START: Call sliver_version first." --append-system-prompt "You are a test runner. You must call tools, not describe them. Every message you send MUST contain tool calls. Never reply with just text. If you need to run a test, call the tool." < ci/test-prompt.md 2>&1 | tee /tmp/pi-test-output.txt
+pi -p ci/test-prompt.md --append-system-prompt "You are a test runner. You must call tools, not describe them. Every message you send MUST contain tool calls. Never reply with just text. If you need to run a test, call the tool." 2>&1 | tee /tmp/pi-test-output.txt
 PI_EXIT=$?
 
 # ----------------------------------------------------------------
