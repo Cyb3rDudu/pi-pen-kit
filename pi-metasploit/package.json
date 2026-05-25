@@ -9,7 +9,8 @@
   },
   "license": "MIT",
   "dependencies": {
-    "msf-script": "file:../msf-script"
+    "msf-script": "file:../msf-script",
+    "@msgpack/msgpack": "^3.1.1"
   },
   "devDependencies": {
     "typebox": "^1.1.38",
