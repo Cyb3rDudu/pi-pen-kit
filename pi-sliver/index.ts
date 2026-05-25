@@ -23,13 +23,10 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import {
   ParseConfigFile,
   SliverClient,
-  clientpb,
-  sliverpb,
   type SliverClientConfig,
   type InteractiveBeacon,
   type InteractiveSession,
 } from "sliver-script";
-import { firstValueFrom, filter, timeout as rxTimeout } from "rxjs";
 
 // ---------------------------------------------------------------------------
 // Config + connection state
@@ -170,71 +167,6 @@ async function getTarget(p: TargetParams): Promise<InteractiveSession | Interact
   const c = await getClient();
   if (p.target_type === "beacon") return c.interactBeacon(p.target_id);
   return c.interactSession(p.target_id);
-}
-
-/**
- * Beacon commands return { Response: { Async: true, TaskID: "..." } } immediately.
- * This helper subscribes to taskResult$ BEFORE issuing the call (avoids race
- * condition), then waits for the beacon to check in, fetches the decoded
- * result. For sessions it just returns the raw result unchanged.
- */
-async function beaconBlockingCall<T>(
-  target: InteractiveSession | InteractiveBeacon,
-  rawCall: () => Promise<T>,
-  decodeResponse: (data: Uint8Array) => T,
-  timeoutSeconds = 60,
-): Promise<T> {
-  // Session path — no async handling needed.
-  if (!(target instanceof InteractiveBeacon)) {
-    // Lie to TS — InteractiveBeacon is the only beacon class.
-    // At runtime, we check with instanceof-like duck typing.
-  }
-  const isBeacon = ("beaconId" in target) && ("taskResult$" in target);
-  if (!isBeacon) {
-    return rawCall();
-  }
-
-  // Beacon path: subscribe to taskResult$ BEFORE the call to avoid race.
-  const beacon = target as unknown as {
-    taskResult$: import("rxjs").Observable<any>;
-    rpc: { getBeaconTaskContent(req: any, opts?: any): Promise<any> };
-    unary(secs: number, fn: (signal: AbortSignal) => Promise<any>): Promise<any>;
-  };
-
-  const result = await rawCall() as any;
-
-  // If not async (shouldn't happen for beacons but be safe), return as-is.
-  if (!result?.Response?.TaskID) {
-    return result;
-  }
-
-  const taskId = result.Response.TaskID;
-  const taskIdHex = typeof taskId === "string" ? taskId : Buffer.from(taskId).toString("hex");
-
-  // Wait for the beacon-taskresult event matching our taskId.
-  const event = await firstValueFrom(
-    beacon.taskResult$.pipe(
-      filter((ev: any) => {
-        try {
-          const task = clientpb.BeaconTask.decode(ev.Data);
-          const got = typeof task.ID === "string" ? task.ID : Buffer.from(task.ID).toString("hex");
-          return got === taskIdHex;
-        } catch { return false; }
-      }),
-      rxTimeout({ each: timeoutSeconds * 1000 }),
-    ),
-  );
-
-  // Decode the BeaconTask to get its database ID for content fetch.
-  const beaconTask = clientpb.BeaconTask.decode(event.Data);
-  const taskDbId = beaconTask.ID;
-
-  // Fetch the actual task content (the protobuf-encoded command result).
-  const taskContent = await beacon.unary(timeoutSeconds, (signal) =>
-    beacon.rpc.getBeaconTaskContent({ ID: taskDbId }, { signal }),
-  );
-
-  return decodeResponse(taskContent.Response);
 }
 
 const TargetSchema = {
@@ -420,7 +352,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     name: "sliver_exec",
     label: "Sliver: execute",
     description:
-      "Run a command on an implant (session or beacon). Returns stdout, stderr, exit status, and PID. For beacons the call blocks until the beacon checks in and returns the result.",
+      "Run a command on an implant (session or beacon). For sessions returns stdout, stderr, exit status, and PID. For beacons the call queues a task — the response contains the TaskID.",
     parameters: Type.Object({
       ...TargetSchema,
       exe: Type.String({ description: "Executable path on the implant (e.g. /usr/bin/whoami, C:\\Windows\\System32\\cmd.exe)" }),
@@ -431,12 +363,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const target = await getTarget(p);
-        const res: any = await beaconBlockingCall(
-          target,
-          () => target.execute(p.exe, p.args ?? [], p.output ?? true, p.timeout),
-          (data) => sliverpb.Execute.decode(data),
-          p.timeout ?? 60,
-        );
+        const res: any = await target.execute(p.exe, p.args ?? [], p.output ?? true, p.timeout);
         return jsonResult({
           status: res?.Status,
           pid: res?.Pid,
@@ -461,11 +388,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.ls(p.path),
-          (data) => sliverpb.Ls.decode(data),
-        ));
+        return jsonResult(await t.ls(p.path));
       } catch (e) {
         return errorResult(e);
       }
@@ -480,11 +403,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.pwd(),
-          (data) => sliverpb.Pwd.decode(data),
-        ));
+        return jsonResult(await t.pwd());
       } catch (e) {
         return errorResult(e);
       }
@@ -499,11 +418,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.cd(p.path),
-          (data) => sliverpb.Pwd.decode(data),
-        ));
+        return jsonResult(await t.cd(p.path));
       } catch (e) {
         return errorResult(e);
       }
@@ -523,11 +438,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.rm(p.path, p.recursive, p.force),
-          (data) => sliverpb.Rm.decode(data),
-        ));
+        return jsonResult(await t.rm(p.path, p.recursive, p.force));
       } catch (e) {
         return errorResult(e);
       }
@@ -542,11 +453,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.mkdir(p.path),
-          (data) => sliverpb.Mkdir.decode(data),
-        ));
+        return jsonResult(await t.mkdir(p.path));
       } catch (e) {
         return errorResult(e);
       }
@@ -567,14 +474,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       try {
         const t = await getTarget(p);
         // v2 download already gunzips and returns a Buffer.
-        const buf = await beaconBlockingCall(
-          t,
-          () => t.download(p.path),
-          (data) => {
-            const d = sliverpb.Download.decode(data);
-            return Buffer.from(d.Data ?? new Uint8Array());
-          },
-        ) as unknown as Buffer;
+        const buf = await t.download(p.path);
         const limit = p.max_bytes ?? 65536;
         const out = buf.subarray(0, limit).toString("utf8");
         return textResult(
@@ -602,14 +502,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        const buf = await beaconBlockingCall(
-          t,
-          () => t.download(p.remote_path),
-          (data) => {
-            const d = sliverpb.Download.decode(data);
-            return Buffer.from(d.Data ?? new Uint8Array());
-          },
-        ) as unknown as Buffer;
+        const buf = await t.download(p.remote_path);
         const dir = ensureDownloadDir();
         const local = join(dir, p.local_name ?? basename(p.remote_path));
         writeFileSync(local, buf);
@@ -633,11 +526,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
       try {
         const t = await getTarget(p);
         const data = readFileSync(p.local_path);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.upload(p.remote_path, data),
-          (d) => sliverpb.Upload.decode(d),
-        ));
+        return jsonResult(await t.upload(p.remote_path, data));
       } catch (e) {
         return errorResult(e);
       }
@@ -655,11 +544,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.ps(p.full_info),
-          (data) => sliverpb.Ps.decode(data),
-        ));
+        return jsonResult(await t.ps(p.full_info));
       } catch (e) {
         return errorResult(e);
       }
@@ -674,11 +559,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.netstat(),
-          (data) => sliverpb.Netstat.decode(data),
-        ));
+        return jsonResult(await t.netstat());
       } catch (e) {
         return errorResult(e);
       }
@@ -693,11 +574,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.ifconfig(),
-          (data) => sliverpb.Ifconfig.decode(data),
-        ));
+        return jsonResult(await t.ifconfig());
       } catch (e) {
         return errorResult(e);
       }
@@ -716,11 +593,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        return jsonResult(await beaconBlockingCall(
-          t,
-          () => t.terminate(p.pid, p.force),
-          (data) => sliverpb.Terminate.decode(data),
-        ));
+        return jsonResult(await t.terminate(p.pid, p.force));
       } catch (e) {
         return errorResult(e);
       }
@@ -736,11 +609,7 @@ export default async function piSliverExtension(pi: ExtensionAPI) {
     async execute(_id, p) {
       try {
         const t = await getTarget(p);
-        const shot: any = await beaconBlockingCall(
-          t,
-          () => t.screenshot(),
-          (data) => sliverpb.Screenshot.decode(data),
-        );
+        const shot: any = await t.screenshot();
         const buf = toBuffer(shot?.Data);
         const dir = ensureDownloadDir();
         const path = join(dir, `screenshot-${Date.now()}.png`);

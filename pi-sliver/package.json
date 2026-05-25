@@ -19,7 +19,6 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "rxjs": "^7.8.2",
     "sliver-script": "github:Cyb3rDudu/sliver-script#bdf84fe7609d18c674aaae7d8078e5d1f5be1a86"
   },
   "keywords": [
@@ -36,7 +35,6 @@
   },
   "devDependencies": {
     "typebox": "^1.1.38",
-    "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   }
 }
