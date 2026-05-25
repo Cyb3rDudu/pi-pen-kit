@@ -19,7 +19,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "sliver-script": "github:Cyb3rDudu/sliver-script#39f6811"
+    "sliver-script": "file:../sliver-script"
   },
   "keywords": [
     "pi-extension",
