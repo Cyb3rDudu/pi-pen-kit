@@ -1,0 +1,21 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Events = void 0;
+var Events;
+(function (Events) {
+    Events["ServerError"] = "server-error";
+    Events["SessionConnected"] = "session-connected";
+    Events["SessionDisconnected"] = "session-disconnected";
+    Events["ClientJoined"] = "client-joined";
+    Events["ClientLeft"] = "client-left";
+    Events["Canary"] = "canary";
+    Events["JobStarted"] = "job-started";
+    Events["JobStopped"] = "job-stopped";
+    Events["Build"] = "build";
+    Events["BuildCompleted"] = "build-completed";
+    Events["Profile"] = "profile";
+    Events["Website"] = "website";
+    Events["LootAddedEvent"] = "loot-added";
+    Events["LootRemovedEvent"] = "loot-removed";
+})(Events || (exports.Events = Events = {}));
+;
