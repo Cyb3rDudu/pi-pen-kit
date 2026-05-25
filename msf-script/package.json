@@ -1,0 +1,21 @@
+{
+  "name": "msf-script",
+  "version": "1.0.0",
+  "description": "Metasploit RPC client for Node.js — HTTP + MessagePack",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "scripts": {
+    "build": "rm -rf ./lib && tsc -p tsconfig.json"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "@msgpack/msgpack": "^3.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
