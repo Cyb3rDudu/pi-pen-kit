@@ -174,9 +174,9 @@ async function getTarget(p: TargetParams): Promise<InteractiveSession | Interact
 
 /**
  * Beacon commands return { Response: { Async: true, TaskID: "..." } } immediately.
- * This helper detects that case, waits for the beacon to check in and complete
- * the task, then fetches and returns the decoded task content.
- * For sessions it just returns the raw result unchanged.
+ * This helper subscribes to taskResult$ BEFORE issuing the call (avoids race
+ * condition), then waits for the beacon to check in, fetches the decoded
+ * result. For sessions it just returns the raw result unchanged.
  */
 async function beaconBlockingCall<T>(
   target: InteractiveSession | InteractiveBeacon,
@@ -184,41 +184,50 @@ async function beaconBlockingCall<T>(
   decodeResponse: (data: Uint8Array) => T,
   timeoutSeconds = 60,
 ): Promise<T> {
-  const result = await rawCall() as any;
-
-  // Session path — already blocking, return as-is.
-  if (!result?.Response?.Async || !result?.Response?.TaskID) {
-    return result;
+  // Session path — no async handling needed.
+  if (!(target instanceof InteractiveBeacon)) {
+    // Lie to TS — InteractiveBeacon is the only beacon class.
+    // At runtime, we check with instanceof-like duck typing.
+  }
+  const isBeacon = ("beaconId" in target) && ("taskResult$" in target);
+  if (!isBeacon) {
+    return rawCall();
   }
 
-  // Beacon async path — wait for the task to complete.
-  const taskId = result.Response.TaskID as string;
+  // Beacon path: subscribe to taskResult$ BEFORE the call to avoid race.
   const beacon = target as unknown as {
-    taskResult$: any;
+    taskResult$: import("rxjs").Observable<any>;
     rpc: { getBeaconTaskContent(req: any, opts?: any): Promise<any> };
     unary(secs: number, fn: (signal: AbortSignal) => Promise<any>): Promise<any>;
   };
 
+  const result = await rawCall() as any;
+
+  // If not async (shouldn't happen for beacons but be safe), return as-is.
+  if (!result?.Response?.TaskID) {
+    return result;
+  }
+
+  const taskId = result.Response.TaskID;
+  const taskIdHex = typeof taskId === "string" ? taskId : Buffer.from(taskId).toString("hex");
+
   // Wait for the beacon-taskresult event matching our taskId.
-  // The event.Data is a BeaconTask protobuf with field ID matching taskId.
   const event = await firstValueFrom(
     beacon.taskResult$.pipe(
       filter((ev: any) => {
         try {
           const task = clientpb.BeaconTask.decode(ev.Data);
-          // protobuf.js string fields are Uint8Array — compare as hex.
           const got = typeof task.ID === "string" ? task.ID : Buffer.from(task.ID).toString("hex");
-          const want = typeof taskId === "string" ? taskId : Buffer.from(taskId).toString("hex");
-          return got === want;
+          return got === taskIdHex;
         } catch { return false; }
       }),
       rxTimeout({ each: timeoutSeconds * 1000 }),
     ),
   );
 
-  // Decode the BeaconTask to get its numeric database ID for content fetch.
+  // Decode the BeaconTask to get its database ID for content fetch.
   const beaconTask = clientpb.BeaconTask.decode(event.Data);
-  const taskDbId = beaconTask.ID; // This is the DB ID used by getBeaconTaskContent
+  const taskDbId = beaconTask.ID;
 
   // Fetch the actual task content (the protobuf-encoded command result).
   const taskContent = await beacon.unary(timeoutSeconds, (signal) =>
