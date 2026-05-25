@@ -107,8 +107,14 @@ PI_EXIT=$?
 # ----------------------------------------------------------------
 echo "[5/6] Parsing test results..."
 
-PASS_COUNT=$(grep -cE '\[PASS\]|\`\[PASS\]\`' /tmp/pi-test-output.txt || echo 0)
-FAIL_COUNT=$(grep -cE '\[FAIL\]|\`\[FAIL\]\`' /tmp/pi-test-output.txt || echo 0)
+PASS_COUNT=$(grep -cE '\[PASS\]' /tmp/pi-test-output.txt 2>/dev/null || true)
+FAIL_COUNT=$(grep -cE '\[FAIL\]' /tmp/pi-test-output.txt 2>/dev/null || true)
+# Ensure they are valid integers (default to 0)
+PASS_COUNT=${PASS_COUNT:-0}
+FAIL_COUNT=${FAIL_COUNT:-0}
+# Trim whitespace
+PASS_COUNT=$(echo "$PASS_COUNT" | tr -d '[:space:]')
+FAIL_COUNT=$(echo "$FAIL_COUNT" | tr -d '[:space:]')
 
 echo ""
 echo "========================================="
