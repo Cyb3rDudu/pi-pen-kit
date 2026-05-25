@@ -1,114 +1,38 @@
-# Sliver Script
+# sliver-script
 
-Sliver-script is a TypeScript/JavaScript client library for Sliver, it can be used to automate any operator interaction with Sliver. Sliver-script uses existing Sliver client configuration files and connects to servers using gRPC over Mutual-TLS. It also provides [RxJS](https://www.learnrxjs.io/) abstractions for easy interactions with real-time components.
+Sliver C2 gRPC client for Node.js — fork of [sliverarmory/sliver-script](https://github.com/sliverarmory/sliver-script) with blocking beacon support.
 
-This library targets modern Sliver protobuf/gRPC APIs and provides a strongly-typed TypeScript-first client.
+Used by [`pi-sliver`](../pi-sliver/) to talk to a Sliver server over gRPC + mTLS.
 
-[![Publish](https://github.com/moloch--/sliver-script/actions/workflows/publish.yml/badge.svg)](https://github.com/moloch--/sliver-script/actions/workflows/publish.yml)
-[![npm version](https://img.shields.io/npm/v/sliver-script.svg)](https://www.npmjs.com/package/sliver-script)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+## What changed from upstream
 
-### Install
+- **Blocking beacon commands**: All `InteractiveBeacon` methods (`execute`, `pwd`, `cd`, `rm`, `mkdir`, `download`, `upload`, `ps`, `ifconfig`, `netstat`, `terminate`, `screenshot`) now block and wait for the beacon to check in before returning results. Uses a generic `queueTask()` helper that mirrors the existing `lsTask()` pattern.
+- **Module resolution**: Uses `nice-grpc` (pure JS gRPC client) instead of the native `@grpc/grpc-js`, making it compatible with Pi's module resolver.
+- **Compiled lib/ committed**: The `lib/` directory is committed to the repo so `npm install` from a `file:` reference works without a build step.
 
-Node v24 or later is required for this package, and it can be installed via npm:
-
-`npm install sliver-script`
-
-
-### TypeScript Example
-
-#### Basic
+## Usage
 
 ```typescript
-import { SliverClient, ParseConfigFile } from 'sliver-script'
+import { SliverClient, ParseConfigFile } from "sliver-script";
 
-(async function() {
-    
-    const config = await ParseConfigFile('./localhost.cfg')
-    const client = new SliverClient(config)
+const config = await ParseConfigFile("~/.sliver-client/configs/myserver.cfg");
+const client = new SliverClient(config);
+await client.connect();
 
-    await client.connect()
+const sessions = await client.sessions();
+const beacon = client.interactBeacon(beaconId);
 
-    const version = await client.getVersion()
-    console.log(version)
-
-    const sessions = await client.sessions()
-    console.log(`Sessions: ${sessions.length}`)
-
-    await client.disconnect()
-
-})()
+// Beacon commands now block!
+const result = await beacon.execute("/usr/bin/whoami");
+console.log(result.Stdout); // "root\n"
 ```
 
-#### Monitor Events in Real-time
+## Tests
 
-```typescript
-import { SliverClient, ParseConfigFile } from 'sliver-script'
-
-(async function() {
-
-    const config = await ParseConfigFile('./localhost.cfg')
-
-    const client = new SliverClient(config)
-    await client.connect()
-    client.event$.subscribe((event) => {
-        console.log(event)
-    })
-
-})()
+```bash
+cd sliver-script && npx vitest run   # 14 unit tests (config parsing)
 ```
 
-#### Automatically Interact with New Sessions
+## License
 
-```typescript
-import { SliverClient, ParseConfigFile } from 'sliver-script'
-
-
-(async function() {
-
-    const config = await ParseConfigFile('./localhost.cfg')
-    const client = new SliverClient(config);
-    await client.connect()
-
-    console.log('Waiting for new sessions ...')
-    client.session$.subscribe(async (event) => {
-        console.log(`New session #${event.Session.ID}!`)
-        const session = client.interactSession(event.Session.ID)
-        const ls = await session.ls('.')
-        console.log(`Path: ${ls.Path}`)
-        ls.Files.forEach(file => {
-            console.log(`Name: ${file.Name} (Size: ${file.Size})`)
-        })
-    })
-
-})()
-```
-
-### JavaScript Example
-
-```javascript
-const sliver = require('sliver-script')
-
-(async function() { 
-
-    const config = await sliver.ParseConfigFile('./localhost.cfg')
-    const client = new sliver.SliverClient(config)
-    await client.connect()
-
-    console.log('Waiting for new sessions ...')
-
-    client.session$.subscribe(async (event) => {
-
-        console.log(`New session #${event.Session.ID}!`)
-
-        const session = client.interactSession(event.Session.ID)
-        const ls = await session.ls('.')
-        console.log(`Path: ${ls.Path}`)
-        ls.Files.forEach(file => {
-            console.log(`Name: ${file.Name} (Size: ${file.Size})`)
-        })
-        
-    })
-
-})()
-```
+BSD-3-Clause (original), modifications MIT.
