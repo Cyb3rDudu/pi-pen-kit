@@ -313,7 +313,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
       "Run an exploit module. Returns job_id and uuid. Use msf_module_results to check the outcome. For synchronous execution with output, use msf_console_run instead.",
     parameters: Type.Object({
       module_name: Type.String({ description: "Exploit module path (e.g. 'windows/smb/ms17_010_psexec')" }),
-      options: Type.Record(Type.String(), Type.Unknown(), { description: "Module options (e.g. { RHOSTS: '10.10.10.5', LHOST: '10.10.14.5', LPORT: 4444 })" }),
+      options: Type.Record(Type.String(), Type.String(), { description: "Module options as string key-value pairs (e.g. { RHOSTS: '10.10.10.5', LHOST: '10.10.14.5', LPORT: '4444' })" }),
       payload: Type.Optional(Type.String({ description: "Payload name (e.g. 'windows/meterpreter/reverse_tcp')" })),
     }),
     async execute(_id, p) {
@@ -335,7 +335,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
     description: "Run an auxiliary module (scanner, fuzzer, admin tool). Returns job_id and uuid.",
     parameters: Type.Object({
       module_name: Type.String({ description: "Auxiliary module path" }),
-      options: Type.Record(Type.String(), Type.Unknown(), { description: "Module options" }),
+      options: Type.Record(Type.String(), Type.String(), { description: "Module options as string key-value pairs" }),
     }),
     async execute(_id, p) {
       try {
@@ -355,7 +355,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       module_name: Type.String({ description: "Post module path" }),
       session_id: Type.Number({ description: "Target session ID" }),
-      options: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Additional module options", default: {} })),
+      options: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Additional module options as string key-value pairs", default: {} })),
     }),
     async execute(_id, p) {
       try {
@@ -379,7 +379,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
         [Type.Literal("exploit"), Type.Literal("auxiliary")],
         { description: "Module type", default: "exploit" },
       ),
-      options: Type.Record(Type.String(), Type.Unknown(), { description: "Module options (must include RHOSTS)" }),
+      options: Type.Record(Type.String(), Type.String(), { description: "Module options as string key-value pairs (must include RHOSTS)" }),
     }),
     async execute(_id, p) {
       try {
@@ -527,7 +527,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       module_name: Type.String({ description: "Post module path (e.g. 'windows/gather/hashdump')" }),
       session_id: Type.Number({ description: "Target session ID" }),
-      options: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Additional options", default: {} })),
+      options: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Additional options as string key-value pairs", default: {} })),
     }),
     async execute(_id, p) {
       try {
@@ -596,7 +596,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
       payload: Type.String({ description: "Payload type (e.g. 'windows/meterpreter/reverse_tcp')" }),
       lhost: Type.String({ description: "Listener bind address" }),
       lport: Type.Number({ description: "Listener port", minimum: 1, maximum: 65535 }),
-      options: Type.Optional(Type.Record(Type.String(), Type.Unknown(), { description: "Additional payload options", default: {} })),
+      options: Type.Optional(Type.Record(Type.String(), Type.String(), { description: "Additional payload options as string key-value pairs", default: {} })),
     }),
     async execute(_id, p) {
       try {
@@ -629,7 +629,7 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
     parameters: Type.Object({
       payload_type: Type.String({ description: "Payload (e.g. 'windows/meterpreter/reverse_tcp')" }),
       format: Type.String({ description: "Output format: exe, raw, python, bash, powershell, etc." }),
-      options: Type.Record(Type.String(), Type.Unknown(), { description: "Payload options (LHOST, LPORT, etc.)" }),
+      options: Type.Record(Type.String(), Type.String(), { description: "Payload options as string key-value pairs (LHOST, LPORT, etc.)" }),
     }),
     async execute(_id, p) {
       try {
