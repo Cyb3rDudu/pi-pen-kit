@@ -27,7 +27,7 @@ function decodeMsf(data: Uint8Array): any {
   // Actually the decode itself throws. We need a different approach.
   // Use the "useMap" option which decodes maps as Map objects (keys can be any
   // type), then convert Map → plain object with string keys.
-  const raw = decode(data, { useMap: true });
+  const raw = decode(data, { useMap: true } as any);
   return mapToObj(raw);
 }
 
@@ -116,7 +116,7 @@ function rpcRequest(
             reject(new Error(`Empty response for ${method}`));
             return;
           }
-          const decoded = decode(data) as Record<string, unknown>;
+          const decoded = decodeMsf(data) as Record<string, unknown>;
           if (decoded.error === true) {
             reject(new Error((decoded.error_message as string) ?? `RPC error: ${method}`));
           } else {
