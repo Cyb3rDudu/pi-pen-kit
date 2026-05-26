@@ -10,9 +10,41 @@
  *   const sessions = await msf.sessions();
  */
 
-import { encode, decode } from "@msgpack/msgpack";
+import { encode, decode, ExtensionCodec } from "@msgpack/msgpack";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
+
+// msfrpcd encodes string keys as msgpack bin type (0xc4) instead of str type
+// (0xaX). @msgpack/msgpack v3 decodes bin as Uint8Array, which cannot be used
+// as a JS object key. Patch: wrap decode to convert any top-level Uint8Array
+// keys (and nested ones) to utf8 strings so the rest of the client sees plain
+// objects.
+function decodeMsf(data: Uint8Array): any {
+  // Decode with a max-depth stringifier for bin values used as map keys.
+  // The library's decode() can't handle bin-as-key, so we use a two-pass
+  // approach: first decode raw, then recursively normalize.
+  //
+  // Actually the decode itself throws. We need a different approach.
+  // Use the "useMap" option which decodes maps as Map objects (keys can be any
+  // type), then convert Map → plain object with string keys.
+  const raw = decode(data, { useMap: true });
+  return mapToObj(raw);
+}
+
+/** Recursively convert Map → plain object, Uint8Array keys → utf8 strings. */
+function mapToObj(v: unknown): unknown {
+  if (v instanceof Map) {
+    const obj: Record<string, unknown> = {};
+    for (const [k, val] of v) {
+      const key = k instanceof Uint8Array ? Buffer.from(k).toString("utf8") : String(k);
+      obj[key] = mapToObj(val);
+    }
+    return obj;
+  }
+  if (Array.isArray(v)) return v.map(mapToObj);
+  if (v instanceof Uint8Array) return Buffer.from(v).toString("utf8");
+  return v;
+}
 
 // ---------------------------------------------------------------------------
 // Config
