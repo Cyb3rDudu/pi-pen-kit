@@ -19,6 +19,9 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { MsfRpcClient, type SessionInfo } from "msf-script";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
 
 // ---------------------------------------------------------------------------
 // Config + connection state
@@ -30,6 +33,12 @@ const MSF_PORT = parseInt(process.env.MSF_PORT?.trim() || "55553", 10);
 const MSF_PASSWORD = process.env.MSF_PASSWORD?.trim() || "";
 const MSF_USERNAME = process.env.MSF_USERNAME?.trim() || "msf";
 const MSF_SSL = process.env.MSF_SSL?.trim() !== "false";
+const DOWNLOAD_DIR = process.env.MSF_DOWNLOAD_DIR?.trim() || join(tmpdir(), "pi-metasploit");
+
+function ensureDownloadDir(): string {
+  try { mkdirSync(DOWNLOAD_DIR, { recursive: true }); } catch {}
+  return DOWNLOAD_DIR;
+}
 
 let client: MsfRpcClient | undefined;
 let uiRef: { notify: (msg: string, level?: string) => void } = {
@@ -625,10 +634,11 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
     name: "msf_generate_payload",
     label: "Metasploit: generate payload",
     description:
-      "Generate a standalone payload and save it to the payloads directory. Returns the local file path and size.",
+      "Generate a standalone payload, save it to the payloads directory, and return the local file path and size.",
     parameters: Type.Object({
       payload_type: Type.String({ description: "Payload (e.g. 'windows/meterpreter/reverse_tcp')" }),
-      format: Type.String({ description: "Output format: exe, raw, python, bash, powershell, etc." }),
+      format: Type.String({ description: "Output format: elf, exe, raw, python, bash, powershell, etc." }),
+      filename: Type.Optional(Type.String({ description: "Output filename (default: payload.<format>)" })),
       options: Type.Record(Type.String(), Type.String(), { description: "Payload options as string key-value pairs (LHOST, LPORT, etc.)" }),
     }),
     async execute(_id, p) {
@@ -639,7 +649,15 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
           Format: p.format,
         };
         const result = await c.moduleExecute("payload", p.payload_type, opts);
-        return jsonResult(result);
+        // moduleExecute for payload type returns { payload: <binary> }
+        const raw = (result as any)?.payload;
+        if (!raw) return jsonResult(result); // fallback: return raw if no payload field
+        const buf = Buffer.from(raw);
+        const dir = ensureDownloadDir();
+        const name = p.filename ?? `payload.${p.format}`;
+        const localPath = join(dir, name);
+        writeFileSync(localPath, buf);
+        return jsonResult({ local_path: localPath, bytes: buf.length, payload_type: p.payload_type, format: p.format });
       } catch (e) {
         return errorResult(e);
       }
