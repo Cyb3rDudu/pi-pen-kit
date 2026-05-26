@@ -167,6 +167,62 @@ extension code parses numeric values where needed.
 
 ---
 
+## Test Results — 2026-05-26
+
+### pi-metasploit (all PASS)
+
+| # | Tool | Status | Notes |
+|---|------|--------|-------|
+| M1 | `msf_version` | ✅ PASS | 6.4.134-dev, Ruby 3.4.8 |
+| M2 | `msf_status` | ✅ PASS | 2650 exploits, 2141 payloads |
+| M3 | `msf_search_exploits` | ✅ PASS | 35 results for "smb" |
+| M4 | `msf_search_payloads` | ✅ PASS | 6 linux/x64/meterpreter payloads |
+| M5 | `msf_module_info` | ✅ PASS | multi/handler full info + options |
+| M6 | `msf_start_listener` | ✅ PASS | Job ID returned, handler running |
+| M7 | `msf_jobs` | ✅ PASS | Lists handler correctly |
+| M8 | `msf_generate_payload` | ✅ PASS | Auto-saves to disk, valid ELF |
+| M9 | `msf_sessions` | ✅ PASS | 2 meterpreter sessions from kobold |
+| M10 | `msf_session_command` | ✅ PASS | cat /home/ben/user.txt → e10abc2ee... |
+| M11 | `msf_session_stop` | ✅ PASS | Sessions terminated |
+| M12 | `msf_job_stop` | ✅ PASS | Handler stopped |
+| M13 | `msf_console` | ✅ PASS | setg LHOST executed |
+| M14 | `msf_search_auxiliary` | ✅ PASS | 50 scanner/http modules |
+| M15 | `msf_module_results` | ⏭️ SKIP | Requires running exploit async |
+
+### pi-sliver
+
+| # | Tool | Status | Notes |
+|---|------|--------|-------|
+| S1 | `sliver_status` | ✅ PASS | v1.7.4, 0 sessions, 2 beacons, 4 jobs |
+| S2 | `sliver_version` | ✅ PASS | 1.7.4 commit d2aa924 |
+| S3 | `sliver_sessions` | ✅ PASS | Empty list (correct) |
+| S4 | `sliver_beacons` | ✅ PASS | Listed 3 beacons with details |
+| S5 | `sliver_jobs` | ✅ PASS | Listed mTLS listener job #7 |
+| S6 | `sliver_operators` | ✅ PASS | dudu online, builder offline |
+| S7 | `sliver_listener_mtls` | ✅ PASS | Started on 0.0.0.0:4443, job #7 |
+| S8 | `sliver_implant_generate` | ✅ PASS | 30MB ELF beacon, saved to /tmp/pi-sliver |
+| S9 | `sliver_implants` | ✅ PASS | Listed 16 implant builds |
+| S10 | Deploy via RCE | ✅ PASS | Beacon checked in from kobold.htb |
+| S11 | `sliver_exec` | ✅ PASS | whoami → ben |
+| S12 | `sliver_pwd` | ✅ PASS | /usr/local/lib/node_modules/@mcpjam/inspector |
+| S13 | `sliver_ls` | ✅ PASS | Listed /home/ben with file sizes |
+| S14 | `sliver_cat` | ✅ PASS | user.txt → e10abc2ee66207d453c0664b32f1ae19 |
+| S15 | `sliver_ps` | ✅ PASS | Full process list with container info |
+| S16 | `sliver_ifconfig` | ✅ PASS | eth0 10.129.245.50, docker0, veth |
+| S17 | `sliver_netstat` | ⚠️ TIMEOUT | Beacon task didn't return in time |
+| S18 | `sliver_download` | ❌ FAIL | Beacon download: "Missing beacon task id" — sliver-script bug |
+| S19 | `sliver_upload` | ✅ PASS | Uploaded 30MB implant to /tmp/upload_test |
+| S20 | `sliver_terminate` | ⏭️ SKIP | Beacon task round-trip too slow for test |
+| S21 | `sliver_job_kill` | ✅ PASS | Killed all 4 stale jobs |
+| S22 | `sliver_screenshot` | ⏭️ SKIP | Headless server, no display |
+
+### Summary
+
+- **pi-metasploit**: 14/14 PASS — all core tools working
+- **pi-sliver**: 17/18 PASS, 1 FAIL (beacon download), 1 TIMEOUT (netstat), 2 SKIPPED
+- **Root cause of failures**: sliver-script `queueTask()` assumes beacon download returns `Response.TaskID`, but download RPC returns data directly on beacons
+- **Key fixes applied**: msf-script msgpack bin-key decoder, pi-metasploit Type.Unknown()→Type.String(), msf_generate_payload auto-save
+
 ## Pass/Fail Criteria
 
 - **PASS**: Tool returns valid data, no schema errors, no timeout
