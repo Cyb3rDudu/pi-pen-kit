@@ -53,6 +53,8 @@ export interface MsfRpcConfig {
   ssl?: boolean;
   /** Request timeout in ms (default 30000) */
   timeout?: number;
+  /** Connection/auth timeout in ms (default: same as timeout) */
+  connectTimeout?: number;
   /** URI path (default /api/) */
   uri?: string;
 }
@@ -147,17 +149,27 @@ export class MsfRpcClient {
 
   /** Authenticate and obtain a session token. */
   async connect(): Promise<this> {
-    const res = (await rpcRequest("auth.login", [
-      this.config.username,
-      this.config.password,
-    ], this.config)) as Record<string, string>;
-
-    if (!res.token) {
-      throw new Error("auth.login failed: no token returned");
+    const savedTimeout = this.config.timeout;
+    // Use shorter timeout for the auth probe to fail fast on SSL mismatch
+    const probeTimeout = (this.config as any).connectTimeout as number | undefined;
+    if (probeTimeout && probeTimeout < savedTimeout) {
+      this.config.timeout = probeTimeout;
     }
-    this.token = res.token;
-    this._connected = true;
-    return this;
+    try {
+      const res = (await rpcRequest("auth.login", [
+        this.config.username,
+        this.config.password,
+      ], this.config)) as Record<string, string>;
+
+      if (!res.token) {
+        throw new Error("auth.login failed: no token returned");
+      }
+      this.token = res.token;
+      this._connected = true;
+      return this;
+    } finally {
+      this.config.timeout = savedTimeout;
+    }
   }
 
   /** Disconnect (invalidate token). */

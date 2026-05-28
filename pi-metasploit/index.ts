@@ -81,10 +81,12 @@ function summarizeSessions(sessions: Record<string, SessionInfo>) {
   }));
 }
 
-/** Lazy-connect to msfrpcd. */
+/** Lazy-connect to msfrpcd. Auto-detects SSL if MSF_SSL is not explicitly set. */
 async function getClient(): Promise<MsfRpcClient> {
   if (client?.isConnected) return client;
   if (!MSF_PASSWORD) throw new Error("MSF_PASSWORD env var is required");
+
+  const sslExplicitlySet = "MSF_SSL" in process.env;
 
   client = new MsfRpcClient({
     host: MSF_HOST,
@@ -92,10 +94,31 @@ async function getClient(): Promise<MsfRpcClient> {
     password: MSF_PASSWORD,
     username: MSF_USERNAME,
     ssl: MSF_SSL,
+    connectTimeout: 5000,
   });
 
-  await client.connect();
-  return client;
+  try {
+    await client.connect();
+    return client;
+  } catch (e) {
+    // If SSL wasn't explicitly configured and the connection failed or timed out,
+    // retry with the opposite SSL setting — msfrpcd -S runs plain HTTP.
+    if (!sslExplicitlySet) {
+      const fallbackSsl = !MSF_SSL;
+      uiRef.notify(`[metasploit] SSL=${MSF_SSL} failed, retrying with SSL=${fallbackSsl}...`, "warn");
+      client = new MsfRpcClient({
+        host: MSF_HOST,
+        port: MSF_PORT,
+        password: MSF_PASSWORD,
+        username: MSF_USERNAME,
+        ssl: fallbackSsl,
+        connectTimeout: 5000,
+      });
+      await client.connect();
+      return client;
+    }
+    throw e;
+  }
 }
 
 // ---------------------------------------------------------------------------
