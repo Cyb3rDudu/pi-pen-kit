@@ -101,6 +101,8 @@ msfrpcd -P yourpassword -S -a 127.0.0.1 -p 55553
 ```
 
 > **Note**: The `-S` flag disables SSL for the RPC connection (msgpack over plain HTTP). This is fine for localhost. Remove `-S` and set `MSF_SSL=true` for remote connections.
+>
+> If `MSF_SSL` is **not** explicitly set, the extension auto-detects: it tries the default SSL setting first, and if the connection times out (5 s), it automatically retries with the opposite setting. For instant connection, set `MSF_SSL=false` explicitly when using `-S`.
 
 ### 2. Configure environment variables
 
@@ -271,3 +273,28 @@ sudo systemctl status msfrpcd
 # Check the password
 sudo cat /etc/msf/msfrpc.env
 ```
+
+### Tool calls hang / timeout (30 s)
+
+This happens when `MSF_SSL` doesn't match msfrpcd's SSL setting. The most common cause: msfrpcd was started with `-S` (no SSL, plain HTTP) but `MSF_SSL` is not set (defaults to `true`). Every RPC call tries HTTPS against an HTTP server and times out.
+
+**Fix** — export `MSF_SSL=false` in your shell **before** starting Pi:
+
+```bash
+export MSF_SSL=false
+```
+
+Or, if you use multiple shells, add the export to all env config files:
+
+```bash
+# bash
+echo 'export MSF_SSL=false' >> ~/.bashrc.d/00-env.bash
+
+# zsh
+echo 'export MSF_SSL=false' >> ~/.zshrc.d/00-env.zsh
+
+# fish
+echo 'set -gx MSF_SSL false' >> ~/.config/fish/conf.d/00-env.fish
+```
+
+> **Note**: You must log out and log back in (or start a new shell) for the change to take effect. The extension also has an SSL auto-detect fallback (5 s probe), so an explicit `MSF_SSL=false` is recommended for instant connection.
