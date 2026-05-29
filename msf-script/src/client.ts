@@ -185,12 +185,22 @@ export class MsfRpcClient {
     }
   }
 
-  /** Low-level RPC call. Automatically prepends the auth token. */
+  /** Low-level RPC call. Automatically prepends the auth token.
+   *  On token expiry, re-authenticates once and retries the call. */
   async call(method: string, ...args: unknown[]): Promise<any> {
     if (!this.token && method !== "auth.login") {
       throw new Error("Not connected — call connect() first");
     }
-    return rpcRequest(method, [this.token, ...args], this.config);
+    try {
+      return await rpcRequest(method, [this.token, ...args], this.config);
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("Invalid Authentication Token")) {
+        // Token expired — re-authenticate and retry once
+        await this.connect();
+        return rpcRequest(method, [this.token, ...args], this.config);
+      }
+      throw e;
+    }
   }
 
   // -----------------------------------------------------------------------

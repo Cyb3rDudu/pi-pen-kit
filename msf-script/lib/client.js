@@ -116,16 +116,27 @@ class MsfRpcClient {
     }
     /** Authenticate and obtain a session token. */
     async connect() {
-        const res = (await rpcRequest("auth.login", [
-            this.config.username,
-            this.config.password,
-        ], this.config));
-        if (!res.token) {
-            throw new Error("auth.login failed: no token returned");
+        const savedTimeout = this.config.timeout;
+        // Use shorter timeout for the auth probe to fail fast on SSL mismatch
+        const probeTimeout = this.config.connectTimeout;
+        if (probeTimeout && probeTimeout < savedTimeout) {
+            this.config.timeout = probeTimeout;
         }
-        this.token = res.token;
-        this._connected = true;
-        return this;
+        try {
+            const res = (await rpcRequest("auth.login", [
+                this.config.username,
+                this.config.password,
+            ], this.config));
+            if (!res.token) {
+                throw new Error("auth.login failed: no token returned");
+            }
+            this.token = res.token;
+            this._connected = true;
+            return this;
+        }
+        finally {
+            this.config.timeout = savedTimeout;
+        }
     }
     /** Disconnect (invalidate token). */
     async disconnect() {
@@ -140,12 +151,23 @@ class MsfRpcClient {
             this._connected = false;
         }
     }
-    /** Low-level RPC call. Automatically prepends the auth token. */
+    /** Low-level RPC call. Automatically prepends the auth token.
+     *  On token expiry, re-authenticates once and retries the call. */
     async call(method, ...args) {
         if (!this.token && method !== "auth.login") {
             throw new Error("Not connected — call connect() first");
         }
-        return rpcRequest(method, [this.token, ...args], this.config);
+        try {
+            return await rpcRequest(method, [this.token, ...args], this.config);
+        }
+        catch (e) {
+            if (e instanceof Error && e.message.includes("Invalid Authentication Token")) {
+                // Token expired — re-authenticate and retry once
+                await this.connect();
+                return rpcRequest(method, [this.token, ...args], this.config);
+            }
+            throw e;
+        }
     }
     // -----------------------------------------------------------------------
     // Auth

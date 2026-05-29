@@ -22,6 +22,8 @@ export interface MsfRpcConfig {
     ssl?: boolean;
     /** Request timeout in ms (default 30000) */
     timeout?: number;
+    /** Connection/auth timeout in ms (default: same as timeout) */
+    connectTimeout?: number;
     /** URI path (default /api/) */
     uri?: string;
 }
@@ -35,7 +37,8 @@ export declare class MsfRpcClient {
     connect(): Promise<this>;
     /** Disconnect (invalidate token). */
     disconnect(): Promise<void>;
-    /** Low-level RPC call. Automatically prepends the auth token. */
+    /** Low-level RPC call. Automatically prepends the auth token.
+     *  On token expiry, re-authenticates once and retries the call. */
     call(method: string, ...args: unknown[]): Promise<any>;
     tokenList(): Promise<string[]>;
     tokenGenerate(): Promise<string>;
