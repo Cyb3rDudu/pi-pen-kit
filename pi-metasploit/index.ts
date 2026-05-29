@@ -56,6 +56,13 @@ function jsonResult(data: unknown) {
   };
 }
 
+/** Safely coerce a value from an RPC response to a string (Buffer or actual string). */
+function str(v: unknown): string {
+  if (v instanceof Buffer) return v.toString("utf8");
+  if (typeof v === "string") return v;
+  return "";
+}
+
 function textResult(text: string, details?: Record<string, unknown>) {
   return {
     content: [{ type: "text" as const, text }],
@@ -72,12 +79,12 @@ function errorResult(e: unknown) {
 function summarizeSessions(sessions: Record<string, SessionInfo>) {
   return Object.entries(sessions).map(([id, s]) => ({
     id: Number(id),
-    type: s.type,
-    info: s.info,
-    tunnel: `${s.tunnel_local} ← ${s.tunnel_peer}`,
-    via: `${s.via_exploit} + ${s.via_payload}`,
-    platform: `${s.platform}/${s.arch}`,
-    host: s.target_host || s.session_host,
+    type: str(s.type),
+    info: str(s.info),
+    tunnel: `${str(s.tunnel_local)} ← ${str(s.tunnel_peer)}`,
+    via: `${str(s.via_exploit)} + ${str(s.via_payload)}`,
+    platform: `${str(s.platform)}/${str(s.arch)}`,
+    host: str(s.target_host) || str(s.session_host),
   }));
 }
 
@@ -147,7 +154,7 @@ export function parseOptionsString(input: string): Record<string, string> {
 
 /** Short session summary string. */
 export function sessionSummary(id: string, s: SessionInfo): string {
-  return `[#${id}] ${s.type} — ${s.info || s.desc} (${s.platform}/${s.arch}) from ${s.target_host || s.session_host}`;
+  return `[#${id}] ${str(s.type)} — ${str(s.info) || str(s.desc)} (${str(s.platform)}/${str(s.arch)}) from ${str(s.target_host) || str(s.session_host)}`;
 }
 
 // ---------------------------------------------------------------------------
