@@ -447,19 +447,16 @@ export class MsfRpcClient {
     await this.call("session.shell_upgrade", Number(sessionId), lhost, lport);
   }
 
-  /** Upload a file to a meterpreter session. Returns the remote path on success. */
-  async sessionUpload(sessionId: number | string, localPath: string, remotePath: string): Promise<string> {
-    const res = await this.call("session.upload", Number(sessionId), localPath, remotePath);
-    return str(res.path ?? remotePath);
+  /** Upload a file to a meterpreter session via the meterpreter upload command.
+   *  Paths are relative to the msfrpcd working directory on the server side. */
+  async sessionUpload(sessionId: number | string, localPath: string, remotePath: string): Promise<void> {
+    await this.meterpreterRunSingle(Number(sessionId), `upload ${localPath} ${remotePath}`);
   }
 
-  /** Download a file from a meterpreter session. Returns the file data as a Buffer. */
-  async sessionDownload(sessionId: number | string, remotePath: string): Promise<Buffer> {
-    const res = await this.call("session.download", Number(sessionId), remotePath);
-    const data = res.data;
-    if (data instanceof Buffer) return data;
-    if (typeof data === "string") return Buffer.from(data, "base64");
-    throw new Error("session.download returned no data");
+  /** Download a file from a meterpreter session via the meterpreter download command.
+   *  The file is saved relative to the msfrpcd working directory. */
+  async sessionDownload(sessionId: number | string, remotePath: string, localPath: string): Promise<void> {
+    await this.meterpreterRunSingle(Number(sessionId), `download ${remotePath} ${localPath}`);
   }
 
   async sessionCompatibleModules(sessionId: number | string): Promise<string[]> {
