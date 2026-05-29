@@ -25,17 +25,16 @@ function binAwareKeyConverter(key: unknown): string | number {
 }
 
 /**
- * Recursively convert Uint8Array values that are valid UTF-8 to strings
- * (msfrpcd encodes string values as binary type). Binary data that
- * isn't valid UTF-8 (e.g. payloads) is preserved as a Buffer.
+ * Recursively convert Uint8Array values to utf8 strings.
+ * msfrpcd encodes ALL values (including strings) as msgpack binary type.
+ * Binary data (payloads) is preserved as Buffer via a null-byte heuristic:
+ *   - Contains null bytes → binary data (keep as Buffer)
+ *   - No null bytes → msfrpcd string (convert to utf8)
  */
 function normalizeBin(v: unknown): unknown {
   if (v instanceof Uint8Array && !(v instanceof Buffer)) {
-    try {
-      return new TextDecoder("utf8", { fatal: true }).decode(v);
-    } catch {
-      return Buffer.from(v);
-    }
+    if (v.indexOf(0) !== -1) return Buffer.from(v);
+    return Buffer.from(v).toString("utf8");
   }
   if (Array.isArray(v)) return v.map(normalizeBin);
   if (v != null && typeof v === "object" && !(v instanceof Date) && !(v instanceof Buffer)) {
@@ -44,6 +43,13 @@ function normalizeBin(v: unknown): unknown {
     return out;
   }
   return v;
+}
+
+/** Safely coerce a value from an RPC response to a string (Buffer or actual string). */
+function str(v: unknown): string {
+  if (v instanceof Buffer) return v.toString("utf8");
+  if (typeof v === "string") return v;
+  return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +92,7 @@ function rpcRequest(
   method: string,
   args: unknown[],
   config: Required<MsfRpcConfig>,
+  raw = false,
 ): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const payload = encode([method, ...args]);
@@ -413,18 +420,20 @@ export class MsfRpcClient {
     while (Date.now() < deadline) {
       if (isMeterpreter) {
         const res = await this.meterpreterRead(Number(sessionId));
-        if (res.data && res.data.trim().length > 0) {
-          output += res.data;
+        const data = str(res.data);
+        if (data.trim().length > 0) {
+          output += data;
           // Give it one more poll to see if there's more
           await sleep(pollIntervalMs);
           const res2 = await this.meterpreterRead(Number(sessionId));
-          if (res2.data) output += res2.data;
+          output += str(res2.data);
           break;
         }
       } else {
         const res = await this.shellRead(Number(sessionId));
-        if (res.data && res.data.trim().length > 0) {
-          output += res.data;
+        const data = str(res.data);
+        if (data.trim().length > 0) {
+          output += data;
           break;
         }
       }
@@ -486,7 +495,7 @@ export class MsfRpcClient {
       let output = "";
       while (Date.now() < deadline) {
         const res = await this.consoleRead(consoleId);
-        if (res.data) output += res.data;
+        output += str(res.data);
         if (!res.busy && output.trim().length > 0) break;
         await sleep(pollIntervalMs);
       }
