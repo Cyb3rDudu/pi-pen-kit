@@ -34,14 +34,14 @@ function binAwareKeyConverter(key) {
  *   - No null bytes → msfrpcd string (convert to utf8)
  */
 function normalizeBin(v) {
-    if (v instanceof Uint8Array && !(v instanceof Buffer)) {
+    if (v instanceof Uint8Array) {
         if (v.indexOf(0) !== -1)
-            return Buffer.from(v);
+            return v;
         return Buffer.from(v).toString("utf8");
     }
     if (Array.isArray(v))
         return v.map(normalizeBin);
-    if (v != null && typeof v === "object" && !(v instanceof Date) && !(v instanceof Buffer)) {
+    if (v != null && typeof v === "object" && !(v instanceof Date)) {
         const out = {};
         for (const [k, val] of Object.entries(v))
             out[k] = normalizeBin(val);
