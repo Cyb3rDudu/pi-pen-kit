@@ -673,9 +673,10 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
         };
         const result = await c.moduleExecute("payload", p.payload_type, opts);
         // moduleExecute for payload type returns { payload: <binary> }
+        // normalizeBin preserves binary data as Buffer, text data as string
         const raw = (result as any)?.payload;
         if (!raw) return jsonResult(result); // fallback: return raw if no payload field
-        const buf = Buffer.from(raw);
+        const buf = raw instanceof Buffer ? raw : Buffer.from(raw, "utf8");
         const dir = ensureDownloadDir();
         const name = p.filename ?? `payload.${p.format}`;
         const localPath = join(dir, name);

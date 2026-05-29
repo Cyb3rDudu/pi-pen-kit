@@ -26,13 +26,23 @@ function binAwareKeyConverter(key) {
         return Buffer.from(key).toString("utf8");
     return String(key);
 }
-/** Recursively convert Uint8Array values to utf8 strings (msfrpcd uses bin for strings). */
+/**
+ * Recursively convert Uint8Array values that are valid UTF-8 to strings
+ * (msfrpcd encodes string values as binary type). Binary data that
+ * isn't valid UTF-8 (e.g. payloads) is preserved as a Buffer.
+ */
 function normalizeBin(v) {
-    if (v instanceof Uint8Array)
-        return Buffer.from(v).toString("utf8");
+    if (v instanceof Uint8Array && !(v instanceof Buffer)) {
+        try {
+            return new TextDecoder("utf8", { fatal: true }).decode(v);
+        }
+        catch {
+            return Buffer.from(v);
+        }
+    }
     if (Array.isArray(v))
         return v.map(normalizeBin);
-    if (v != null && typeof v === "object" && !(v instanceof Date)) {
+    if (v != null && typeof v === "object" && !(v instanceof Date) && !(v instanceof Buffer)) {
         const out = {};
         for (const [k, val] of Object.entries(v))
             out[k] = normalizeBin(val);
