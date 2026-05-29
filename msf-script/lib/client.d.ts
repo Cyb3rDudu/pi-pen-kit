@@ -96,6 +96,10 @@ export declare class MsfRpcClient {
     /** Send a shell command and wait for output. Handles both shell and meterpreter sessions. */
     sessionCommand(sessionId: number | string, command: string, timeoutMs?: number, pollIntervalMs?: number): Promise<string>;
     shellUpgrade(sessionId: number | string, lhost: string, lport: number): Promise<void>;
+    /** Upload a file to a meterpreter session. Returns the remote path on success. */
+    sessionUpload(sessionId: number | string, localPath: string, remotePath: string): Promise<string>;
+    /** Download a file from a meterpreter session. Returns the file data as a Buffer. */
+    sessionDownload(sessionId: number | string, remotePath: string): Promise<Buffer>;
     sessionCompatibleModules(sessionId: number | string): Promise<string[]>;
     consoleCreate(): Promise<{
         id: string;

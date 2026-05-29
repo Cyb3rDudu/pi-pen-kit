@@ -592,6 +592,56 @@ export default async function piMetasploitExtension(pi: ExtensionAPI) {
   });
 
   // =======================================================================
+  // File transfer (meterpreter sessions only)
+  // =======================================================================
+
+  pi.registerTool({
+    name: "msf_session_upload",
+    label: "Metasploit: upload file",
+    description:
+      "Upload a file to a meterpreter session. The file is transferred via the meterpreter channel. Only works with meterpreter sessions, not shell sessions.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Meterpreter session ID" }),
+      local_path: Type.String({ description: "Local file path to upload" }),
+      remote_path: Type.String({ description: "Remote destination path on target" }),
+    }),
+    async execute(_id, p) {
+      try {
+        const c = await getClient();
+        const remote = await c.sessionUpload(p.session_id, p.local_path, p.remote_path);
+        return jsonResult({ result: "success", session_id: p.session_id, local_path: p.local_path, remote_path: remote });
+      } catch (e) {
+        return errorResult(e);
+      }
+    },
+  });
+
+  pi.registerTool({
+    name: "msf_session_download",
+    label: "Metasploit: download file",
+    description:
+      "Download a file from a meterpreter session. Saves the file to the download directory and returns the local path and size. Only works with meterpreter sessions, not shell sessions.",
+    parameters: Type.Object({
+      session_id: Type.Number({ description: "Meterpreter session ID" }),
+      remote_path: Type.String({ description: "Remote file path to download" }),
+      filename: Type.Optional(Type.String({ description: "Local filename (default: same as remote basename)" })),
+    }),
+    async execute(_id, p) {
+      try {
+        const c = await getClient();
+        const buf = await c.sessionDownload(p.session_id, p.remote_path);
+        const dir = ensureDownloadDir();
+        const name = p.filename ?? p.remote_path.split("/").pop() ?? "downloaded_file";
+        const localPath = join(dir, name);
+        writeFileSync(localPath, buf);
+        return jsonResult({ local_path: localPath, bytes: buf.length, session_id: p.session_id, remote_path: p.remote_path });
+      } catch (e) {
+        return errorResult(e);
+      }
+    },
+  });
+
+  // =======================================================================
   // Console
   // =======================================================================
 

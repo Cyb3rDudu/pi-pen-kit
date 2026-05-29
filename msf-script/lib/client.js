@@ -362,6 +362,21 @@ class MsfRpcClient {
     async shellUpgrade(sessionId, lhost, lport) {
         await this.call("session.shell_upgrade", Number(sessionId), lhost, lport);
     }
+    /** Upload a file to a meterpreter session. Returns the remote path on success. */
+    async sessionUpload(sessionId, localPath, remotePath) {
+        const res = await this.call("session.upload", Number(sessionId), localPath, remotePath);
+        return str(res.path ?? remotePath);
+    }
+    /** Download a file from a meterpreter session. Returns the file data as a Buffer. */
+    async sessionDownload(sessionId, remotePath) {
+        const res = await this.call("session.download", Number(sessionId), remotePath);
+        const data = res.data;
+        if (data instanceof Buffer)
+            return data;
+        if (typeof data === "string")
+            return Buffer.from(data, "base64");
+        throw new Error("session.download returned no data");
+    }
     async sessionCompatibleModules(sessionId) {
         const res = await this.call("session.compatible_modules", Number(sessionId));
         return res.modules ?? [];
