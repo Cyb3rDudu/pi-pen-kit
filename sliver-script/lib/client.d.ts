@@ -4,7 +4,7 @@ import { TunnelManager } from "./internal/tunnelManager";
 import type { Event, Operators, Sessions, Version, Beacons, Jobs, Beacon, GenerateSpoofMetadataReq, ImplantConfig, ImplantProfile, Loot, WebContent } from "./pb/clientpb/client";
 import type { Request as CommonRequest } from "./pb/commonpb/common";
 import type { SliverRPCClient } from "./pb/rpcpb/services";
-import { Ls, Execute, Pwd, Rm, Mkdir, Download, Upload, Ps, Ifconfig, Netstat, Terminate, Screenshot } from "./pb/sliverpb/sliver";
+import { Ls, Execute, Pwd, Rm, Mkdir, Upload, Ps, Ifconfig, Netstat, Terminate, Screenshot } from "./pb/sliverpb/sliver";
 export interface Tunnel {
     readonly id: string;
     readonly stdout$: Observable<Buffer>;
@@ -86,15 +86,7 @@ export declare class InteractiveBeacon extends BaseCommands {
         wait: (waitTimeoutSeconds?: number) => Promise<Mkdir>;
     }>;
     mkdir(path: string, timeoutSeconds?: number): Promise<Mkdir>;
-    downloadTask(path: string, timeoutSeconds?: number): Promise<{
-        id: any;
-        wait: (waitTimeoutSeconds?: number) => Promise<Download>;
-    }>;
     download(path: string, timeoutSeconds?: number): Promise<Buffer>;
-    uploadTask(path: string, data: Buffer, timeoutSeconds?: number): Promise<{
-        id: any;
-        wait: (waitTimeoutSeconds?: number) => Promise<Upload>;
-    }>;
     upload(path: string, data: Buffer, timeoutSeconds?: number): Promise<Upload>;
     psTask(fullInfo?: boolean, timeoutSeconds?: number): Promise<{
         id: any;

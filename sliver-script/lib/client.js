@@ -208,27 +208,43 @@ class InteractiveBeacon extends BaseCommands {
         const t = await this.mkdirTask(path, timeoutSeconds);
         return t.wait(timeoutSeconds);
     }
-    async downloadTask(path, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-        return this.queueTask(() => super.download(path, timeoutSeconds), sliver_1.Download.decode, timeoutSeconds);
-    }
     async download(path, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-        const t = await this.downloadTask(path, timeoutSeconds);
-        const decoded = await t.wait(timeoutSeconds);
-        const data = decoded.Data ?? decoded.data;
-        if (decoded.Encoder === "gzip") {
-            return gunzip(data);
+        // Download RPC returns a TaskID (unlike session downloads which return data).
+        // Queue the task, wait for the beacon to check in, then fetch the content.
+        const raw = await super.download(path, timeoutSeconds);
+        if (raw.Response?.Err) {
+            throw new Error(raw.Response.Err);
         }
-        if (decoded.Encoder !== "") {
-            throw new Error(`Unsupported encoder: ${decoded.Encoder}`);
+        const taskId = raw.Response?.TaskID;
+        if (!taskId) {
+            throw new Error("Missing beacon task id for download");
         }
-        return Buffer.isBuffer(data) ? data : Buffer.from(data);
-    }
-    async uploadTask(path, data, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-        return this.queueTask(() => super.upload(path, data, timeoutSeconds), sliver_1.Upload.decode, timeoutSeconds);
+        const beaconTask = await waitForBeaconTask(this.taskResult$, taskId, timeoutSeconds);
+        const taskContent = await this.unary(timeoutSeconds, (signal) => this.rpc.getBeaconTaskContent({ ID: beaconTask.ID }, { signal }));
+        // Download content is the raw task content (not a proto message)
+        const data = taskContent.Response;
+        if (data instanceof Uint8Array || Buffer.isBuffer(data)) {
+            // Check if gzipped
+            if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) {
+                return gunzip(data);
+            }
+            return Buffer.isBuffer(data) ? data : Buffer.from(data);
+        }
+        throw new Error(`Unexpected download content type: ${typeof data}`);
     }
     async upload(path, data, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
-        const t = await this.uploadTask(path, data, timeoutSeconds);
-        return t.wait(timeoutSeconds);
+        // Upload RPC for beacons returns a TaskID — wait for the implant to acknowledge it.
+        const raw = await super.upload(path, data, timeoutSeconds);
+        if (raw.Response?.Err) {
+            throw new Error(raw.Response.Err);
+        }
+        const taskId = raw.Response?.TaskID;
+        if (!taskId) {
+            // No TaskID means the server handled it synchronously — upload succeeded
+            return raw;
+        }
+        await waitForBeaconTask(this.taskResult$, taskId, timeoutSeconds);
+        return raw;
     }
     async psTask(fullInfo = false, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS) {
         return this.queueTask(() => super.ps(fullInfo, timeoutSeconds), sliver_1.Ps.decode, timeoutSeconds);
@@ -556,16 +572,19 @@ exports.SliverClient = SliverClient;
 async function waitForBeaconTask(taskResult$, taskId, timeoutSeconds) {
     return new Promise((resolve, reject) => {
         const timeoutMs = Math.floor(timeoutSeconds * 1000);
+        let receivedWrongId = false;
         const timer = setTimeout(() => {
             sub.unsubscribe();
-            reject(new Error(`Timeout waiting for beacon task result: ${taskId}`));
+            reject(new Error(`Timeout waiting for beacon task result: ${taskId}${receivedWrongId ? " (received task results for other tasks but not this one)" : ""}`));
         }, timeoutMs);
         const sub = taskResult$.subscribe({
             next: (event) => {
                 try {
                     const task = client_1.BeaconTask.decode(event.Data);
-                    if (task.ID !== taskId)
+                    if (task.ID !== taskId) {
+                        receivedWrongId = true;
                         return;
+                    }
                     clearTimeout(timer);
                     sub.unsubscribe();
                     resolve(task);
@@ -573,7 +592,7 @@ async function waitForBeaconTask(taskResult$, taskId, timeoutSeconds) {
                 catch (err) {
                     clearTimeout(timer);
                     sub.unsubscribe();
-                    reject(err);
+                    reject(new Error(`Failed to decode beacon task result: ${err instanceof Error ? err.message : String(err)}`));
                 }
             },
             error: (err) => {
