@@ -394,15 +394,16 @@ export class InteractiveBeacon extends BaseCommands {
     const taskContent = await this.unary(timeoutSeconds, (signal) =>
       this.rpc.getBeaconTaskContent({ ID: beaconTask.ID }, { signal }),
     );
-    // Download content is the raw task content
-    const data = taskContent.Response;
-    if (data instanceof Uint8Array || Buffer.isBuffer(data)) {
-      if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) {
-        return gunzip(data) as Promise<Buffer>;
-      }
-      return Buffer.isBuffer(data) ? data : Buffer.from(data);
+    // Beacon task content is a protobuf-encoded Download message
+    const download = Download.decode(taskContent.Response);
+    const data = Buffer.from(download.Data);
+    if (download.Encoder === "gzip") {
+      return gunzip(data) as Promise<Buffer>;
     }
-    throw new Error(`Unexpected download content type: ${typeof data}`);
+    if (download.Encoder !== "") {
+      throw new Error(`Unsupported encoder: ${download.Encoder}`);
+    }
+    return data;
   }
 
   async upload(path: string, data: Buffer, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS): Promise<Upload> {
