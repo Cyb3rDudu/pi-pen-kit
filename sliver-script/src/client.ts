@@ -378,9 +378,11 @@ export class InteractiveBeacon extends BaseCommands {
   }
 
   async download(path: string, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS): Promise<Buffer> {
-    // Download RPC returns a TaskID (unlike session downloads which return data).
-    // Queue the task, wait for the beacon to check in, then fetch the content.
-    const raw = await super.download(path, timeoutSeconds) as any;
+    // Cannot use super.download() — it returns a Buffer, discarding the TaskID
+    // needed for beacon task tracking. Call the raw RPC instead.
+    const raw = await this.unary(timeoutSeconds, (signal) =>
+      this.rpc.download({ Path: path, Request: this.request(timeoutSeconds) }, { signal }),
+    ) as any;
     if (raw.Response?.Err) {
       throw new Error(raw.Response.Err);
     }
@@ -392,10 +394,9 @@ export class InteractiveBeacon extends BaseCommands {
     const taskContent = await this.unary(timeoutSeconds, (signal) =>
       this.rpc.getBeaconTaskContent({ ID: beaconTask.ID }, { signal }),
     );
-    // Download content is the raw task content (not a proto message)
+    // Download content is the raw task content
     const data = taskContent.Response;
     if (data instanceof Uint8Array || Buffer.isBuffer(data)) {
-      // Check if gzipped
       if (data.length >= 2 && data[0] === 0x1f && data[1] === 0x8b) {
         return gunzip(data) as Promise<Buffer>;
       }
@@ -405,14 +406,19 @@ export class InteractiveBeacon extends BaseCommands {
   }
 
   async upload(path: string, data: Buffer, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS): Promise<Upload> {
-    // Upload RPC for beacons returns a TaskID — wait for the implant to acknowledge it.
-    const raw = await super.upload(path, data, timeoutSeconds) as any;
+    // Call raw RPC to get the full response including TaskID
+    const payload = await gzip(data);
+    const raw = await this.unary(timeoutSeconds, (signal) =>
+      this.rpc.upload(
+        { Path: path, Encoder: "gzip", Data: payload, Request: this.request(timeoutSeconds) },
+        { signal },
+      ),
+    ) as any;
     if (raw.Response?.Err) {
       throw new Error(raw.Response.Err);
     }
     const taskId = raw.Response?.TaskID;
     if (!taskId) {
-      // No TaskID means the server handled it synchronously — upload succeeded
       return raw as Upload;
     }
     await waitForBeaconTask(this.taskResult$, taskId, timeoutSeconds);
